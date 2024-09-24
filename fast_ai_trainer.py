@@ -93,6 +93,10 @@ def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
     print(f"Model saved as {filename}")
 
 def main():
+    # step 0: create models directory
+    if not os.path.exists('models'):
+        os.makedirs('models')
+        
     # Step 1: Get the data
     data = get_data()
 
