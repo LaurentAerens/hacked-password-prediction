@@ -406,6 +406,10 @@ def evolutionary_training(X_train, X_test, y_train, y_test, experiment_dir, surv
             no_improvement_generations += 1
 
 def main():
+    # step 0: create models directory
+    if not os.path.exists('models'):
+        os.makedirs('models')
+
     # Step 1: Get the data
     data = get_data()
 
