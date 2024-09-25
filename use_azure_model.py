@@ -1,3 +1,5 @@
+# This is now included in the use_model.py file. So this file is now mainly for testing only the Azure model.
+
 import urllib.request
 import json
 import os
@@ -14,7 +16,7 @@ allowSelfSignedHttps(True) # this line is needed if you use self-signed certific
 def check_password(password):
     # Prepare the data payload
     data = {
-        "Inputs": {
+        "input_data": {
             "data": [
                 {"password": password}
             ]
@@ -23,37 +25,37 @@ def check_password(password):
 
     body = str.encode(json.dumps(data))
 
-    url = 'http://30e75f18-d937-4d51-a097-deebae87acd3.westeurope.azurecontainer.io/score'
-    headers = {'Content-Type': 'application/json'}
+    url = '[your-endpoint-url]'  # Replace this with the endpoint URL
+    # Replace this with the primary/secondary key, AMLToken, or Microsoft Entra ID token for the endpoint
+    api_key = '[your-api-key]'
+    if not api_key:
+        raise Exception("A key should be provided to invoke the endpoint")
+        
+    headers = {'Content-Type':'application/json', 'Authorization':('Bearer '+ api_key)}
 
     req = urllib.request.Request(url, body, headers)
-
+    
     try:
         response = urllib.request.urlopen(req)
         result = response.read()
         return json.loads(result)
     except urllib.error.HTTPError as error:
         print("The request failed with status code: " + str(error.code))
-        # Print the headers - they include the request ID and the timestamp, which are useful for debugging the failure
         print(error.info())
-        print(error.read().decode("utf8", 'ignore'))
+        print(json.loads(error.read().decode("utf8", 'ignore')))
         return None
 
-# Main loop to prompt the user for passwords
 def main():
     while True:
-        password = input("Enter a password to check (or type 'exit' to go back): ")
+        password = input("Enter a password to check (or type 'exit' to quit): ")
         if password.lower() == 'exit':
             break
+        
         result = check_password(password)
-        if result:
-            is_hacked = result.get('Results', [None])[0]
-            if is_hacked is True:
-                print(f'The password "{password}" is most likely a HACKED password. Be Warned!')
-            elif is_hacked is False:
-                print(f'The password "{password}" is most likely NOT a hacked password.')
-            else:
-                print(f'Unexpected result for "{password}": {result}')
-
+        
+        if result is not None:
+            print(f"Password is hacked: {result}")
+        else:
+            print("Failed to get a valid response from the model.")
 if __name__ == "__main__":
     main()
