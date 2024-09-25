@@ -1,6 +1,6 @@
 import os
-import signal
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime
 
 import joblib
 import pandas as pd
@@ -26,11 +26,9 @@ preprocessing_options = {
 # List of models
 models = {
     'LogisticRegression': LogisticRegression(max_iter=100, n_jobs=-1),
-    'RandomForest': RandomForestClassifier(n_estimators=100, n_jobs=-1),
+    'RandomForest': RandomForestClassifier(n_estimators=50,max_depth=10,min_samples_split=10, min_samples_leaf=5, n_jobs=-1),
     'SVM': SVC(probability=True, max_iter=100),
-    'LinearSVM': LinearSVC(max_iter=100),
-    'KNeighbors': KNeighborsClassifier(n_jobs=-1),
-    'GradientBoosting': GradientBoostingClassifier(n_estimators=100),
+    'KNeighbors': KNeighborsClassifier(n_neighbors=3,algorithm='auto',n_jobs=-1),
     'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='logloss')
 }
 
@@ -74,9 +72,8 @@ class TimeoutException(Exception):
     pass
 
 
-def timeout_handler(signum, frame):
+def timeout_handler():
     raise TimeoutException("Training exceeded the time limit of 24 hours.")
-
 
 def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
     """
@@ -97,12 +94,13 @@ def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
     # Validate inputs
     if X_train is None or X_test is None or y_train is None or y_test is None or model is None:
         raise ValueError("Training and testing data and model must not be None.")
-    if len(X_train) == 0 or len(X_test) == 0 or len(y_train) == 0 or len(y_test) == 0:
+    if X_train.shape[0] == 0 or X_test.shape[0] == 0 or len(y_train) == 0 or len(y_test) == 0:
         raise ValueError("Training and testing data must not be empty.")
     
-    # Set up timeout handler
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(24 * 3600)  # Set timeout for 24 hours
+    # Set up timeout handler using threading.Timer
+    timeout = 24 * 3600  # Set timeout for 24 hours
+    timer = threading.Timer(timeout, timeout_handler)
+    timer.start()
     
     try:
         if preprocessing:
@@ -142,8 +140,8 @@ def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
     except TimeoutException as e:
         print(f"Error: {e}")
     finally:
-        # Disable the alarm
-        signal.alarm(0)
+        # Disable the timer
+        timer.cancel()
 
 
 def create_models_directory():
@@ -376,7 +374,7 @@ def main():
     try:
         create_models_directory()
         data = get_data()
-        vectorizer = get_vectorizer(data)
+        vectorizer, _ = get_vectorizer(data)
         X, y = transform_data(vectorizer, data)
         X_train, X_test, y_train, y_test = split_data(X, y)
         selected_combinations = select_combinations()
