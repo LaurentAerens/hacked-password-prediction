@@ -8,8 +8,7 @@ def main():
         print("3. Train models, generational mode (a few days and potentially very accurate)")
         print("4. Train NN model (not yet implemented)")
         print("5. Use local models")
-        print("6. Use Azure model")
-        print("7. Exit")
+        print("6. Exit")
         choice = input("Enter your choice: ")
         print("\n \n")
 
@@ -29,9 +28,6 @@ def main():
             print("Using local models...")
             subprocess.run(["python", "use_model.py"])
         elif choice == '6':
-            print("Using Azure model...")
-            subprocess.run(["python", "use_azure_model.py"])
-        elif choice == '7':
             print("Exiting...")
             break
         else:
