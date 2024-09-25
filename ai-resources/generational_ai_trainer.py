@@ -1,6 +1,8 @@
 import os
 import random
 import shutil
+import json
+from collections import defaultdict
 from datetime import datetime
 
 import joblib
@@ -52,6 +54,17 @@ models = {
     'MLP': (MLPClassifier, {'hidden_layer_sizes': [(100,), (50, 50), (30, 30, 30)], 'activation': ['relu', 'tanh'], 'max_iter': [200, 500]})
 }
 
+# Initialize a dictionary to store hyperparameters and AUC scores
+hyperparam_scores = defaultdict(lambda: defaultdict(dict))
+
+# Function to save hyperparameters and AUC scores to a file
+def save_hyperparam_scores():
+    os.makedirs('tuning', exist_ok=True)
+    for model_preprocessing, scores in hyperparam_scores.items():
+        file_path = f'tuning/{model_preprocessing}.json'
+        with open(file_path, 'w') as f:
+            json.dump(scores, f)
+
 def get_data(file_path='data/combined_data.csv'):
     """
     Load data from a CSV file into a pandas DataFrame and remove all null values.
@@ -61,12 +74,31 @@ def get_data(file_path='data/combined_data.csv'):
     
     Returns:
     pd.DataFrame: The cleaned DataFrame.
+    
+    Raises:
+    FileNotFoundError: If the file does not exist.
+    ValueError: If the file is not in CSV format or if the data is empty after removing null values.
     """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"The file {file_path} does not exist.")
+    
+    if not file_path.endswith('.csv'):
+        raise ValueError(f"The file {file_path} is not in CSV format.")
+    
     print(f"Loading data from {file_path}...")
-    data = pd.read_csv(file_path)
+    try:
+        data = pd.read_csv(file_path)
+    except Exception as e:
+        raise ValueError(f"Error reading the CSV file: {e}")
+    
     print("Removing null values...")
     data = data.dropna()
+    
+    if data.empty:
+        raise ValueError("The data is empty after removing null values.")
+    
     return data
+
 
 def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
     """
@@ -122,7 +154,40 @@ def select_models(models, survival_rate=0.3):
     selected_models = random.choices(models, k=num_survivors, weights=[model['auc_score'] for model in models])
     return selected_models
 
-def mutate_models(selected_models, param_distributions, total_models, n_iter=10):
+def update_hyperparam_scores(model_name, preprocessing_name, params, auc_score):
+    """
+    Update the hyperparameters and AUC scores for a given model/preprocessing combo.
+    
+    Parameters:
+    model_name (str): The name of the model.
+    preprocessing_name (str): The name of the preprocessing step.
+    params (dict): The hyperparameters.
+    auc_score (float): The AUC score.
+    """
+    key = json.dumps(params, sort_keys=True)
+    combo_key = f"{model_name}_{preprocessing_name}"
+    hyperparam_scores[combo_key][key] = auc_score
+
+
+def get_best_params(model_name, preprocessing_name):
+    """
+    Get the best hyperparameters for a given model/preprocessing combo.
+    
+    Parameters:
+    model_name (str): The name of the model.
+    preprocessing_name (str): The name of the preprocessing step.
+    
+    Returns:
+    dict: The best hyperparameters.
+    """
+    combo_key = f"{model_name}_{preprocessing_name}"
+    if combo_key in hyperparam_scores:
+        best_params = max(hyperparam_scores[combo_key], key=hyperparam_scores[combo_key].get)
+        return json.loads(best_params)
+    return None
+
+
+def mutate_models(selected_models, param_distributions, total_models, n_iter=10, generation=1, max_generations=10):
     """
     Tune the hyperparameters of the selected models to create new versions.
     
@@ -131,8 +196,9 @@ def mutate_models(selected_models, param_distributions, total_models, n_iter=10)
     param_distributions (dict): The hyperparameter distributions for each model.
     total_models (int): The total number of models to generate.
     n_iter (int): The number of iterations for hyperparameter tuning.
+    generation (int): The current generation number.
+    max_generations (int): The maximum number of generations.
     
-
     Returns:
     list: A list of new models with tuned hyperparameters.
     """
@@ -141,13 +207,30 @@ def mutate_models(selected_models, param_distributions, total_models, n_iter=10)
     total_weights = sum(weights)
     normalized_weights = [weight / total_weights for weight in weights]
     
+    # Adaptive mutation rate
+    mutation_rate = max(0.1, 1 - (generation / max_generations))
+    
     for model_info in selected_models:
         model_class = model_info['model'].__class__
-        param_dist = param_distributions[model_class.__name__]
+        model_name = model_class.__name__
+        preprocessing_name = model_info['preprocessing'] or 'None'
+        param_dist = param_distributions[model_name]
         num_mutations = max(1, int(normalized_weights[selected_models.index(model_info)] * total_models))
+        
+        # Get the best hyperparameters found so far for this model/preprocessing combo
+        best_params = get_best_params(model_name, preprocessing_name)
         
         param_sampler = ParameterSampler(param_dist, n_iter=num_mutations)
         for params in param_sampler:
+            if best_params:
+                # Determine which parameters to mutate
+                params_to_mutate = select_params_to_mutate(best_params, generation, max_generations)
+                
+                # Mutate from the best hyperparameters
+                for param in params_to_mutate:
+                    if param in best_params:
+                        params[param] = best_params[param] + random.uniform(-mutation_rate, mutation_rate) * best_params[param]
+            
             new_model = model_class(**params)
             new_models.append({
                 'model': new_model,
@@ -158,8 +241,18 @@ def mutate_models(selected_models, param_distributions, total_models, n_iter=10)
     while len(new_models) < total_models:
         model_info = random.choice(selected_models)
         model_class = model_info['model'].__class__
-        param_dist = param_distributions[model_class.__name__]
+        model_name = model_class.__name__
+        preprocessing_name = model_info['preprocessing'] or 'None'
+        param_dist = param_distributions[model_name]
         params = next(ParameterSampler(param_dist, n_iter=1))
+        
+        best_params = get_best_params(model_name, preprocessing_name)
+        if best_params:
+            params_to_mutate = select_params_to_mutate(best_params, generation, max_generations, combo_key=f"{model_name}_{preprocessing_name}")
+            for param in params_to_mutate:
+                if param in best_params:
+                    params[param] = best_params[param] + random.uniform(-mutation_rate, mutation_rate) * best_params[param]
+        
         new_model = model_class(**params)
         new_models.append({
             'model': new_model,
@@ -167,6 +260,39 @@ def mutate_models(selected_models, param_distributions, total_models, n_iter=10)
         })
     
     return new_models
+
+def select_params_to_mutate(best_params, generation, max_generations, combo_key):
+    """
+    Select which parameters to mutate based on the generation and parameter stability.
+    
+    Parameters:
+    best_params (dict): The best hyperparameters found so far.
+    generation (int): The current generation number.
+    max_generations (int): The maximum number of generations.
+    
+    Returns:
+    list: A list of parameters to mutate.
+    """
+    params = list(best_params.keys())
+    num_params = len(params)
+    
+    # Determine the number of parameters to mutate
+    mutation_fraction = max(0.1, 1 - (generation / max_generations))
+    num_params_to_mutate = max(1, int(mutation_fraction * num_params))
+    
+    # Select parameters to mutate
+    params_to_mutate = random.sample(params, num_params_to_mutate)
+    
+    
+    # Adjust the probability of mutation based on parameter stability
+    for param in params:
+        if param not in params_to_mutate:
+            top_auc_scores = [hyperparam_scores[combo_key][key] for key in hyperparam_scores[combo_key] if param in json.loads(key)]
+            if len(set(top_auc_scores)) == 1:
+                if random.random() < 0.1:  # Lower the chance of mutation for stable parameters
+                    params_to_mutate.append(param)
+    
+    return params_to_mutate
 
 
 def log_best_model(model_info, experiment_dir, generation, previous_generation):
@@ -405,13 +531,13 @@ def evolutionary_training(X_train, X_test, y_train, y_test, experiment_dir, surv
         else:
             no_improvement_generations += 1
 
-def main():
+def main_loop(experiment_name, data_file_path='data/combined_data.csv'):
     # step 0: create models directory
     if not os.path.exists('models'):
         os.makedirs('models')
 
     # Step 1: Get the data
-    data = get_data()
+    data = get_data(data_file_path)
 
     # Step 2: Check if vectorizer exists, if not create a new one
     vectorizer_path = 'models/vectorizer.joblib'
@@ -437,8 +563,7 @@ def main():
     # Step 3: Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Step 4: Ask the user for an experiment name
-    experiment_name = input("Enter the experiment name: ")
+    # Step 4: Create an experiment directory
     date_str = datetime.now().strftime("%Y%m%d%H%M%S")
     experiment_dir = f"models/experiment-{experiment_name}-{date_str}"
     os.makedirs(experiment_dir, exist_ok=True)
@@ -446,6 +571,8 @@ def main():
 
     # Step 5: Perform evolutionary training
     evolutionary_training(X_train, X_test, y_train, y_test, experiment_dir)
-
+def main():
+    experiment_name = input("Enter the experiment name: ")
+    main_loop(experiment_name)
 if __name__ == "__main__":
     main()
