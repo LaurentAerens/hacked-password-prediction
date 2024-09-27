@@ -512,7 +512,10 @@ def evolutionary_training(X_train, X_test, y_train, y_test, experiment_dir, surv
             params_str = '-'.join([f'{key}={value}' for key, value in params.items()])
             auc_score = model_info['auc_score']
             date_str = datetime.now().strftime("%Y%m%d%H%M%S")
-            filename = f"{model_name}-{preprocessing_name}-{params_str}-{date_str}-{auc_score:.4f}.joblib"
+            if preprocessing_name == 'None':
+                filename = f"{model_name}-{params_str}-{date_str}-{auc_score:.4f}.joblib"
+            else:
+                filename = f"{model_name}-{preprocessing_name}-{params_str}-{date_str}-{auc_score:.4f}.joblib"
             filepath = os.path.join(generation_dir, filename)
             joblib.dump(model, filepath)
             print(f"Model saved as {filepath}")

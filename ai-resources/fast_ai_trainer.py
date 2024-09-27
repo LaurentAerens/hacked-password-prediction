@@ -244,7 +244,7 @@ def split_data(X, y):
     return train_test_split(X, y, test_size=0.2, random_state=42)
 
 
-def train_single_model_with_preprocessing(model_name, preprocessing_name):
+def train_single_model_with_preprocessing(model_name, preprocessing_name, data_file_path='data/combined_data.csv'):
     """
     Train a single model with a single preprocessing option.
     
@@ -257,7 +257,7 @@ def train_single_model_with_preprocessing(model_name, preprocessing_name):
     """
     warnings = []
     create_models_directory()
-    data = get_data()
+    data = get_data(data_file_path)
     vectorizer, vectorizer_warnings = get_vectorizer(data)
     warnings.extend(vectorizer_warnings)
     X, y = transform_data(vectorizer, data)
@@ -271,7 +271,7 @@ def train_single_model_with_preprocessing(model_name, preprocessing_name):
     return warnings
 
 
-def train_list_of_models_with_preprocessing(model_preprocessing_list):
+def train_list_of_models_with_preprocessing(model_preprocessing_list, data_file_path='data/combined_data.csv'):
     """
     Train a list of models with their respective preprocessing options.
     
@@ -283,7 +283,7 @@ def train_list_of_models_with_preprocessing(model_preprocessing_list):
     """
     warnings = []
     create_models_directory()
-    data = get_data()
+    data = get_data(data_file_path)
     vectorizer, vectorizer_warnings = get_vectorizer(data)
     warnings.extend(vectorizer_warnings)
     X, y = transform_data(vectorizer, data)
@@ -297,7 +297,7 @@ def train_list_of_models_with_preprocessing(model_preprocessing_list):
     return warnings
 
 
-def train_all_models_with_preprocessing():
+def train_all_models_with_preprocessing(data_file_path='data/combined_data.csv'):
     """
     Train all models with all preprocessing options and without preprocessing.
     
@@ -306,7 +306,7 @@ def train_all_models_with_preprocessing():
     """
     warnings = []
     create_models_directory()
-    data = get_data()
+    data = get_data(data_file_path)
     vectorizer, vectorizer_warnings = get_vectorizer(data)
     warnings.extend(vectorizer_warnings)
     X, y = transform_data(vectorizer, data)

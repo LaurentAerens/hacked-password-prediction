@@ -235,6 +235,82 @@ def generate_data(file_path, output_file_path, generated_data_factor):
         print(f"An error occurred: {e}")
         raise
 
+
+def regenerate_negative_samples(file_path, output_file_path, generated_data_factor):
+    """
+    Regenerate negative samples (random passwords not in the cracked list).
+
+    Args:
+        file_path (str): The path to the input CSV file.
+        output_file_path (str): The path to the output CSV file.
+        generated_data_factor (int): The factor of uncracked passwords to cracked passwords.
+
+    """
+    # Read the existing data
+    data = pd.read_csv(file_path)
+    # remove all negative samples
+    data = data[data['target'] == 1]
+    # Determine the maximum length of the longest positive password
+    max_length = data['password'].str.len().max()
+    print(f"Maximum length of positive passwords: {max_length}")
+    # Generate negative samples (random passwords not in the cracked list)
+    num_negative_samples = len(data) * generated_data_factor
+    print("Generating negative samples...")
+    negative_samples = generate_negative_samples(num_negative_samples, data['password'].values, max_length)
+    print(f"Generated {len(negative_samples)} negative samples.")
+    negative_samples_df = pd.DataFrame({
+        'password': negative_samples,
+        'target': 0
+    })
+    # Combine positive and negative samples
+    print("Combining positive and negative samples...")
+    data = pd.concat([data, negative_samples_df])
+    # Remove any remaining NaN values from the final table
+    data = data.dropna()
+    # Ensure no duplicates between positive and negative samples
+    data = data.drop_duplicates(subset=['password'], keep='first')
+    # Write the combined dataset to a new CSV file
+    print(f"Writing combined data to {output_file_path}...")
+    data.to_csv(output_file_path, index=False)
+
+def generate_data_from_listofcrackedpasswords(cracked_passwords, output_file_path, generated_data_factor):
+    """
+    Generate data by reading passwords from a list of cracked passwords, cleaning the data, generating negative samples,
+    and writing the combined data to a new CSV file.
+
+    Args:
+        cracked_passwords (list): A list of cracked passwords.
+        output_file_path (str): The path to the output CSV file.
+        generated_data_factor (int): The factor of uncracked passwords to cracked passwords.
+
+    """
+    # Create a DataFrame from the list of cracked passwords
+    passwords = pd.DataFrame(cracked_passwords, columns=['password'])
+    # Create a binary target variable where 1 indicates the password is in the list
+    passwords['target'] = 1
+    # Determine the maximum length of the longest positive password
+    max_length = passwords['password'].str.len().max()
+    print(f"Maximum length of positive passwords: {max_length}")
+    # Generate negative samples (random passwords not in the cracked list)
+    num_negative_samples = len(passwords) * generated_data_factor
+    print("Generating negative samples...")
+    negative_samples = generate_negative_samples(num_negative_samples, passwords['password'].values, max_length)
+    print(f"Generated {len(negative_samples)} negative samples.")
+    negative_samples_df = pd.DataFrame({
+        'password': negative_samples,
+        'target': 0
+    })
+    # Combine positive and negative samples
+    print("Combining positive and negative samples...")
+    data = pd.concat([passwords, negative_samples_df])
+    # Remove any remaining NaN values from the final table
+    data = data.dropna()
+    # Ensure no duplicates between positive and negative samples
+    data = data.drop_duplicates(subset=['password'], keep='first')
+    # Write the combined dataset to a new CSV file
+    print(f"Writing combined data to {output_file_path}...")
+    data.to_csv(output_file_path, index=False)
+
 def main():
     """
     Main function for manual use.
