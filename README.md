@@ -1,4 +1,18 @@
-# Password Predictor
+# H.A.R.P. - Hacked Account Risk Predictor
+
+```
+/ ',        ,--,
+`;, '------'  @
+ //'\-\-\-'\.'/
+|| \ \ \ \,' /
+||  \ \ \'  /
+ \\  \,\   /
+  \\,'    /
+   `-----'
+Tostig
+```
+
+
 ## Some background info:
 In 2021 during covid I was an IT student and looking for some fun. I decided to set up a ssh honeypot and see what kind of passwords hackers where trying on it.
 Al this data can be found in [SSH-findings](https://github.com/anakwaboe4/SSH-findings) project. I copied over the main events.csv file to this project to use as a dataset.

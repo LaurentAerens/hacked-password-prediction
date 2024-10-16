@@ -2,6 +2,7 @@ import os
 import random
 import shutil
 import json
+import atexit
 from collections import defaultdict
 from datetime import datetime
 
@@ -56,6 +57,34 @@ models = {
 
 # Initialize a dictionary to store hyperparameters and AUC scores
 hyperparam_scores = defaultdict(lambda: defaultdict(dict))
+
+model_storage_path = 'models/model_storage.json'
+
+atexit.register(lambda: save_model_storage(model_storage))
+
+def load_model_storage() -> Dict[str, str]:
+    """
+    Load the model storage from a JSON file.
+    
+    Returns:
+    dict: A dictionary containing model names and their paths.
+    """
+    if os.path.exists(model_storage_path):
+        with open(model_storage_path, 'r') as file:
+            return json.load(file)
+    return {}
+
+def save_model_storage(model_storage: Dict[str, str]) -> None:
+    """
+    Save the model storage to a JSON file.
+    
+    Parameters:
+    model_storage (dict): A dictionary containing model names and their paths.
+    """
+    with open(model_storage_path, 'w') as file:
+        json.dump(model_storage, file, indent=4)
+
+model_storage = load_model_storage()
 
 # Function to save hyperparameters and AUC scores to a file
 def save_hyperparam_scores():

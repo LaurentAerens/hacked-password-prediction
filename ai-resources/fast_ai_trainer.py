@@ -1,6 +1,9 @@
 import os
 import threading
+import json
+import atexit
 from datetime import datetime
+from typing import Dict
 
 import joblib
 import pandas as pd
@@ -32,6 +35,36 @@ models = {
     'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='logloss')
 }
 
+model_storage_path = 'models/model_storage.json'
+
+atexit.register(lambda: save_model_storage(model_storage))
+
+class TimeoutException(Exception):
+    pass
+
+def load_model_storage() -> Dict[str, str]:
+    """
+    Load the model storage from a JSON file.
+    
+    Returns:
+    dict: A dictionary containing model names and their paths.
+    """
+    if os.path.exists(model_storage_path):
+        with open(model_storage_path, 'r') as file:
+            return json.load(file)
+    return {}
+
+def save_model_storage(model_storage: Dict[str, str]) -> None:
+    """
+    Save the model storage to a JSON file.
+    
+    Parameters:
+    model_storage (dict): A dictionary containing model names and their paths.
+    """
+    with open(model_storage_path, 'w') as file:
+        json.dump(model_storage, file, indent=4)
+
+model_storage = load_model_storage()
 
 def get_data(file_path='data/combined_data.csv'):
     """
@@ -66,10 +99,6 @@ def get_data(file_path='data/combined_data.csv'):
         raise ValueError("The data is empty after removing null values.")
     
     return data
-
-
-class TimeoutException(Exception):
-    pass
 
 
 def timeout_handler():
@@ -136,6 +165,9 @@ def train_model(X_train, X_test, y_train, y_test, model, preprocessing=None):
         
         joblib.dump(pipeline, filename)
         print(f"Model saved as {filename}")
+        
+        # Update model storage
+        model_storage[model_name] = filename
     
     except TimeoutException as e:
         print(f"Error: {e}")
