@@ -3,6 +3,7 @@ import re
 import json
 import ssl
 import joblib
+import warnings
 import urllib.request
 from typing import List, Dict, Any, Union
 
@@ -153,7 +154,7 @@ def select_models() -> (Dict[int, Any], List[Dict[str, Any]]):
     print("Selected models loaded successfully.")
     return selected_models, models
 
-def use_models(selected_models: Dict[int, Any], model_details: List[Dict[str, Any]]) -> None:
+def use_selected_models(selected_models: Dict[int, Any], model_details: List[Dict[str, Any]]) -> None:
     """
     Use selected models on user input.
     """
@@ -189,7 +190,93 @@ def use_models(selected_models: Dict[int, Any], model_details: List[Dict[str, An
                 else:
                     print(f"Model {details['model_name']} (AUC: {details['auc_score']:.4f}, Preprocessing: {preprocessing_name}) predicted that '{user_input}' is a HACKED password.")
 
+
+def get_all_model_paths(models_dir: str) -> Dict[str, str]:
+    """
+    Traverse the models directory and its subdirectories to create a dictionary
+    mapping model filenames to their paths.
+    """
+    model_paths = {}
+    for root, _, files in os.walk(models_dir):
+        for file in files:
+            if file.endswith('.joblib'):
+                model_paths[file] = os.path.join(root, file)
+    return model_paths
+
+def load_models(models_filename: List[str]) -> List[Dict[str, Any]]:
+    """
+    Find the models corresponding to the names in models_filename and load them into the models list.
+    Not finding a model is a warning, finding no models is an error.
+    Next to these models, azure is also an option in the list if azure_url, api_key, and azure_model_auc are set in the config file.
+    """
+    model_paths = get_all_model_paths(models_dir)
+    models = []
+
+    for filename in models_filename:
+        if filename == 'azure':
+            if azure_url and api_key and azure_model_auc:
+                models.append({'model_name': 'Azure Model', 'type': 'azure'})
+            else:
+                warnings.warn("Azure model specified but azure_url, api_key, or azure_model_auc is missing in the config file.")
+        else:
+            if filename in model_paths:
+                model_path = model_paths[filename]
+                models.append({'model_name': filename, 'model': joblib.load(model_path), 'type': 'local'})
+            else:
+                warnings.warn(f"Model file {filename} not found.")
+
+    if not models:
+        raise ValueError("No valid models found. If you only wanted to use the Azure model, just call that API directly on url: {azure_url}")
+
+    return models
+
+def use_Models_on_Passwords(models_filename: List[str], passwords: List[str]) -> Dict[str, Any]:
+    """
+    Use selected models on the list of passwords.
+
+    Args:
+        models_filename (list): List of model names.
+        passwords (list): The list of passwords to predict.
+
+    Returns:
+    json: A JSON object containing every password and the predictions of each model.
+    """
+    if not isinstance(passwords, list) or not all(isinstance(p, str) for p in passwords):
+        return {"error": "Passwords must be a list of strings."}
+
+    
+
+    vectorizer_file = os.path.join(models_dir, 'vectorizer.joblib')
+    if not os.path.exists(vectorizer_file):
+        return {"error": "Vectorizer file not found."}
+    
+    vectorizer = joblib.load(vectorizer_file)
+    json_output = {}
+
+    for password in passwords:
+        vectorized_input = vectorizer.transform([password])
+        predictions = []
+
+        if use_azure:
+            result = check_password_azure(password)
+            if result is not None and isinstance(result, list) and len(result) > 0:
+                is_hacked = result[0]
+                if isinstance(is_hacked, bool):
+                    predictions.append({"Azure": is_hacked})
+                else:
+                    raise ValueError("Unexpected response format from Azure model.")
+            else:
+                raise ValueError("Failed to get a valid response from the Azure model.")
+
+        for model in models:
+            prediction = model['model'].predict(vectorized_input)[0]
+            predictions.append({model['model_name']: prediction})
+
+        json_output[password] = predictions
+
+    return json_output
+
 # Main function
 if __name__ == "__main__":
     selected_models, model_details = select_models()
-    use_models(selected_models, model_details)
+    use_selected_models(selected_models, model_details)
