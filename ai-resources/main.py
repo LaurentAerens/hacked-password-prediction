@@ -1,8 +1,17 @@
 import subprocess
 
 def main():
+    print(r""" Welcome to H.A.R.P. - Hacked Account Risk Predictor
+/ ',        ,--,
+`;, '------'  @
+ //'\-\-\-'\.'/
+|| \ \ \ \,' /
+||  \ \ \'  /
+ \\  \,\   /
+  \\,'    /
+   `-----'          Cedit Ascii: Tostig""")
     while True:
-        print("\n\nMenu:")
+        print("\nMenu:")
         print("1. Generate Data")
         print("2. Train models, fast mode (a few hours but very un-accurate)")
         print("3. Train models, generational mode (a few days and potentially very accurate)")
