@@ -11,9 +11,8 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from data_generation import get_data
+from shared_lib.data_utils import get_data
 from modern_trainers.optimizers.sklearn_hpo import train_with_gridsearch
-from modern_trainers.registries.mlflow_registry import MLflowRegistry
 
 ASCII_ART = r""" Welcome to H.A.R.P. - Hacked Account Risk Predictor v2
 / ',        ,--,
@@ -47,7 +46,9 @@ def phase1_training():
     """Phase 1: GridSearchCV training."""
     print("\n📊 Loading data...")
     try:
-        X, y = get_data('data/combined_data.csv')
+        df = get_data('data/combined_data.csv')
+        X = df['password'].astype(str).tolist()
+        y = df['target'].tolist()
         print(f"✅ Loaded {len(X)} samples")
     except FileNotFoundError:
         print("❌ Data not found. Run option 1 to generate data first.")
