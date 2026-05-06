@@ -1,3 +1,8 @@
 */models
 config.json
 .venv
+mlruns/
+.optuna/
+*.pyc
+__pycache__/
+.mlflow/
