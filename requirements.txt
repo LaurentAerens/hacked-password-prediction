@@ -4,3 +4,11 @@ pandas==2.2.3
 Requests==2.32.3
 scikit_learn==1.5.2
 xgboost==2.1.1
+
+# v2: Modern ML Frameworks
+mlflow>=2.0.0
+optuna>=3.0.0
+lightgbm>=4.0.0
+matplotlib>=3.5.0
+plotly>=5.0.0
+scipy>=1.10.0
