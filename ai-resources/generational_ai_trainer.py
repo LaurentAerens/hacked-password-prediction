@@ -1,3 +1,9 @@
+"""
+⚠️  DEPRECATED in v2 — This trainer is no longer used
+See: modern_trainers/optimizers/sklearn_hpo.py instead (GridSearchCV replacement)
+For v1 (archived), see: archive/v1-azure branch
+"""
+
 import os
 import random
 import shutil

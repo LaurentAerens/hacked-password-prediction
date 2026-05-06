@@ -1,3 +1,10 @@
+"""
+⚠️  DEPRECATED in v2 — Incomplete genetic algorithm (never finished)
+See: modern_trainers/optimizers/sklearn_hpo.py (GridSearchCV)
+For Phase 2: modern_trainers/optimizers/optuna_hpo.py (Bayesian HPO)
+For v1 (archived), see: archive/v1-azure branch
+"""
+
 # Rewrite of the generational_ai_trainer.py script because that script started to look like a mess
 
 # let's start by defining the steps the program need to go through for a training session so we can cross them off as we go
