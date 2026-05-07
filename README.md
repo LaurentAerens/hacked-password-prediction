@@ -53,6 +53,14 @@ Run the trainer:
 python ai-resources/main.py
 ```
 
+Run the new UI (Python + Streamlit):
+
+```bash
+"C:\\Program Files\\Python314\\python.exe" -m streamlit run ai-resources/ui_app.py
+```
+
+Do not run `ui_app.py` directly with `python`. Streamlit apps should be started with `-m streamlit run`.
+
 ### API
 
 Run the API server:
