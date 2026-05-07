@@ -2,9 +2,43 @@ import pandas as pd
 import numpy as np
 import random
 import string
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
+from functools import lru_cache
+
+try:
+    from wordfreq import top_n_list
+except ImportError:
+    top_n_list = None
+
+
+@lru_cache(maxsize=1)
+def _get_local_word_pool():
+    """Build a reusable local word pool for offline generation."""
+    if top_n_list is not None:
+        words = [w for w in top_n_list("en", 50000) if isinstance(w, str) and w.isalpha()]
+        if words:
+            return words
+
+    # Last-resort embedded words so generation still works without external services.
+    return [
+        "alpha", "banana", "cipher", "delta", "ember", "forest", "galaxy", "harbor", "island", "jungle",
+        "kernel", "lemon", "matrix", "nebula", "orange", "planet", "quantum", "rocket", "signal", "thunder",
+        "update", "vector", "window", "xenon", "yellow", "zephyr", "anchor", "bridge", "circle", "dragon"
+    ]
+
+
+def _fetch_random_word_batch_local(batch_size, max_length):
+    pool = _get_local_word_pool()
+    bounded = [w for w in pool if len(w) <= max_length]
+    if not bounded:
+        bounded = [w[:max_length] for w in pool if max_length > 0] or ["pass"]
+
+    words = random.choices(bounded, k=batch_size)
+    for i in range(len(words)):
+        if random.random() < 0.25:
+            words[i] = words[i].capitalize()
+    return words
 
 def generate_random_password(length):
     """
@@ -40,7 +74,7 @@ def generate_random_password_batch(batch_size, existing_passwords, max_length):
 
 def fetch_random_word_batch(batch_size, max_length):
     """
-    Fetch a batch of random words from an API.
+    Fetch a batch of random words from local sources only.
     
     Args:
         batch_size (int): The number of words to fetch.
@@ -48,21 +82,8 @@ def fetch_random_word_batch(batch_size, max_length):
     
     Returns:
         list: A list of fetched words.
-    
-    Raises:
-        RuntimeError: If the API request fails.
     """
-    try:
-        response = requests.get(f'https://random-word.ryanrk.com/api/en/word/random/{batch_size}?maxLength={max_length}')
-        response.raise_for_status()
-        words = response.json()
-        # Turn the first letter to a capital letter in 25% of the cases
-        for i in range(len(words)):
-            if random.random() < 0.25:
-                words[i] = words[i].capitalize()
-        return words
-    except requests.RequestException as e:
-        raise RuntimeError("Failed to fetch random words from the API. The API might be down.") from e
+    return _fetch_random_word_batch_local(batch_size, max_length)
 
 def fetch_random_word_plus_int_batch(batch_size, max_length):
     """

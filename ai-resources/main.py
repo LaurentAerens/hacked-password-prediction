@@ -46,7 +46,9 @@ def phase1_training():
     """Phase 1: GridSearchCV training."""
     print("\n📊 Loading data...")
     try:
-        df = get_data('data/combined_data.csv')
+        # Use absolute path relative to script location
+        data_path = Path(__file__).parent / 'data' / 'combined_data.csv'
+        df = get_data(str(data_path))
         X = df['password'].astype(str).tolist()
         y = df['target'].tolist()
         print(f"✅ Loaded {len(X)} samples")
@@ -75,17 +77,19 @@ def phase1_training():
         print(f"   Best AUC: {result['best_config']['auc']:.4f}")
         print(f"   Combinations tested: {result['metrics']['combinations_tested']}")
         
-        # Save results
-        os.makedirs('results', exist_ok=True)
-        results_csv = f"results/phase1_gridsearch_{result['experiment_name']}.csv"
-        result['results_df'].to_csv(results_csv, index=False)
+        # Save results (use absolute path relative to script)
+        results_dir = Path(__file__).parent / 'results'
+        results_dir.mkdir(exist_ok=True)
+        results_csv = results_dir / f"phase1_gridsearch_{result['experiment_name']}.csv"
+        result['results_df'].to_csv(str(results_csv), index=False)
         print(f"   📁 Results saved: {results_csv}")
         
-        # Save best model
-        os.makedirs('models', exist_ok=True)
-        model_path = 'models/phase1_best_model.pkl'
+        # Save best model (use absolute path relative to script)
+        models_dir = Path(__file__).parent / 'models'
+        models_dir.mkdir(exist_ok=True)
+        model_path = models_dir / 'phase1_best_model.pkl'
         import joblib
-        joblib.dump(result['best_model'], model_path)
+        joblib.dump(result['best_model'], str(model_path))
         print(f"   📁 Model saved: {model_path}")
         
     except Exception as e:
@@ -107,8 +111,9 @@ def phase2_training():
 def data_generation():
     """Generate training data."""
     print("\n📥 Generating data...")
+    script = Path(__file__).parent / "data_generation.py"
     try:
-        subprocess.run(["python", "data_generation.py"], check=True)
+        subprocess.run([sys.executable, str(script)], check=True, cwd=str(Path(__file__).parent))
         print("✅ Data generation complete")
     except subprocess.CalledProcessError:
         print("❌ Data generation failed")
@@ -119,14 +124,15 @@ def use_models():
     """Use trained models for predictions."""
     print("\n🔮 Model Prediction (uses Phase 1 best model)")
     
-    model_path = 'models/phase1_best_model.pkl'
-    if not os.path.exists(model_path):
+    # Use absolute path relative to script location
+    model_path = Path(__file__).parent / 'models' / 'phase1_best_model.pkl'
+    if not model_path.exists():
         print(f"❌ Model not found at {model_path}")
         print("   Run Phase 1 training first (option 2)")
         return
     
     import joblib
-    model = joblib.load(model_path)
+    model = joblib.load(str(model_path))
     
     print("\n✅ Model loaded successfully")
     print("   Enter passwords to check (or 'quit' to exit):\n")
@@ -155,7 +161,7 @@ def mlflow_ui():
     print("   Open browser: http://localhost:5000")
     print("   Press Ctrl+C to stop\n")
     try:
-        subprocess.run(["mlflow", "ui", "--host", "127.0.0.1"], check=True)
+        subprocess.run([sys.executable, "-m", "mlflow", "ui", "--host", "127.0.0.1"], check=True)
     except FileNotFoundError:
         print("❌ MLflow not installed. Run: pip install -r requirements.txt")
     except KeyboardInterrupt:
