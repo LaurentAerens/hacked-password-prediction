@@ -6,3 +6,7 @@ mlruns/
 *.pyc
 __pycache__/
 .mlflow/
+*/plan/*
+test_results.txt
+test_output.log
+ai-resources/results/checkpoints/*

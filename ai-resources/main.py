@@ -102,15 +102,75 @@ def phase1_training():
         traceback.print_exc()
 
 def phase2_training():
-    """Phase 2: Optuna Bayesian HPO (placeholder for now)."""
+    """Phase 2: Optuna Bayesian fine-tuning on top Phase 1 candidates."""
     print("\n🔬 Phase 2: Optuna Bayesian Hyperparameter Optimization")
-    print("   ⏳ Implementation in progress (Wave 3)")
-    print("   Estimated release: 1-2 weeks")
-    print("\n   Phase 2 will provide:")
-    print("   • Bayesian optimization (vs exhaustive GridSearch)")
-    print("   • Adaptive trial pruning (skip bad trials early)")
-    print("   • ~50% fewer trials needed for same quality")
-    print("   • Full parallelization with joblib")
+
+    try:
+        data_path = Path(__file__).parent / 'data' / 'combined_data.csv'
+        df = get_data(str(data_path))
+        X = df['password'].astype(str).tolist()
+        y = df['target'].tolist()
+        print(f"✅ Loaded {len(X)} samples")
+    except FileNotFoundError:
+        print("❌ Data not found. Run option 1 to generate data first.")
+        return
+
+    print("\n⚙️ Running Phase 1 + Phase 2 pipeline...")
+    print("   • Phase 1: adaptive screening + full CV")
+    print("   • Phase 2: Optuna TPE + Hyperband on top candidates")
+
+    try:
+        result = train_with_adaptive_search(
+            X, y,
+            models=None,
+            preprocessors=None,
+            cv_folds=5,
+            top_percent=0.20,
+            n_jobs=-1,
+            random_state=42,
+            run_phase2=True,
+            phase2_top_n=3,
+            phase2_trials_per_model=20,
+        )
+
+        results_dir = Path(__file__).parent / 'results'
+        results_dir.mkdir(exist_ok=True)
+        models_dir = Path(__file__).parent / 'models'
+        models_dir.mkdir(exist_ok=True)
+
+        phase1_csv = results_dir / f"phase1_gridsearch_{result['experiment_name']}.csv"
+        result['results_df'].to_csv(str(phase1_csv), index=False)
+
+        import joblib
+        phase1_model = models_dir / 'phase1_best_model.pkl'
+        joblib.dump(result['best_model'], str(phase1_model))
+
+        phase2_df = result.get('phase2_results_df')
+        if phase2_df is not None and not phase2_df.empty:
+            phase2_csv = results_dir / f"phase2_optuna_{result['experiment_name']}.csv"
+            phase2_df.to_csv(str(phase2_csv), index=False)
+
+            phase2_models_dir = models_dir / 'phase2'
+            phase2_models_dir.mkdir(exist_ok=True)
+            for key, model in (result.get('phase2_model_registry') or {}).items():
+                safe_name = key.replace('__', '_')
+                joblib.dump(model, str(phase2_models_dir / f"{safe_name}.pkl"))
+
+            best_phase2 = phase2_df.iloc[0]
+            print("\n✅ Phase 2 Complete!")
+            print(
+                f"   Best Phase 2: {best_phase2['model']} + {best_phase2['preprocessor']} "
+                f"(AUC={best_phase2['phase2_best_auc']:.4f})"
+            )
+            print(f"   📁 Phase 2 results saved: {phase2_csv}")
+            print(f"   📁 Phase 2 models saved: {phase2_models_dir}")
+        else:
+            print("\nℹ️ Phase 2 enabled, but no candidates completed.")
+
+    except Exception as e:
+        print(f"❌ Phase 2 training failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def data_generation():
     """Generate training data."""

@@ -184,7 +184,7 @@ def generate_negative_samples(num_samples, existing_passwords, max_length):
 
     return negative_samples[:num_samples]
 
-def generate_data(file_path, output_file_path, generated_data_factor):
+def generate_data(file_path, output_file_path, generated_data_factor, password_column='password'):
     """
     Generate data by reading passwords from a CSV file, cleaning the data, generating negative samples,
     and writing the combined data to a new CSV file.
@@ -193,6 +193,7 @@ def generate_data(file_path, output_file_path, generated_data_factor):
         file_path (str): The path to the input CSV file.
         output_file_path (str): The path to the output CSV file.
         generated_data_factor (int): The factor of uncracked passwords to cracked passwords.
+        password_column (str): Name of the column containing passwords (default: 'password').
     
     Raises:
         FileNotFoundError: If the input file does not exist.
@@ -200,9 +201,10 @@ def generate_data(file_path, output_file_path, generated_data_factor):
         pd.errors.ParserError: If the input file is not a valid CSV.
     """
     try:
-        # Read only the 'password' column from the CSV file
+        # Read only the password column from the CSV file and normalise to 'password'
         print("Reading CSV file...")
-        passwords = pd.read_csv(file_path, usecols=['password'])
+        passwords = pd.read_csv(file_path, usecols=[password_column])
+        passwords = passwords.rename(columns={password_column: 'password'})
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Input data file not found: {file_path}") from e
     except pd.errors.EmptyDataError as e:
