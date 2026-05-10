@@ -10,3 +10,4 @@ __pycache__/
 test_results.txt
 test_output.log
 ai-resources/results/checkpoints/*
+.venv-ui/*

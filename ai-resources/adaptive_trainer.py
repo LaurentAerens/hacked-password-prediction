@@ -339,6 +339,11 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
         models = sorted(models, key=lambda name: model_speed_priority.get(name, 999))
 
     preprocessors = preprocessors or list(all_preprocessors.keys())
+
+    # Password datasets are text by default, so keep only text-compatible preprocessors.
+    is_text_input = len(X) > 0 and isinstance(X[0], str)
+    if is_text_input:
+        preprocessors = [p for p in preprocessors if all_preprocessors[p].get('requires_text', False)]
     
     # Initialize telemetry emitter
     if run_id is None:

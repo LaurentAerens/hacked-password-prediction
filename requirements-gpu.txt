@@ -1,0 +1,4 @@
+-r requirements-core.txt
+# For GPU installs: ensure CUDA and cuDNN are installed per TensorFlow docs.
+tensorflow==2.11.0
+protobuf==3.19.6

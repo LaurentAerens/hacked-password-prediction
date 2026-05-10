@@ -55,11 +55,22 @@ python ai-resources/main.py
 
 Run the new UI (Python + Streamlit):
 
-```bash
-"C:\\Program Files\\Python314\\python.exe" -m streamlit run ai-resources/ui_app.py
+If you installed the UI with the helper (`--with-ui`), Streamlit is installed into `.venv-ui` to avoid protobuf conflicts with TensorFlow. Run the app using the venv Python:
+
+```powershell
+.venv-ui\Scripts\python.exe -m streamlit run ai-resources/ui_app.py
+```
+
+Or activate the venv and run Streamlit normally:
+
+```powershell
+.venv-ui\Scripts\Activate.ps1
+streamlit run ai-resources/ui_app.py
 ```
 
 Do not run `ui_app.py` directly with `python`. Streamlit apps should be started with `-m streamlit run`.
+
+If you see an error like "ImportError: cannot import name 'builder' from 'google.protobuf.internal'", it means your current Python environment has an incompatible `protobuf` version; use the `.venv-ui` environment (above) so Streamlit uses a compatible protobuf.
 
 ### API
 
@@ -70,6 +81,51 @@ python application.py
 ```
 
 **Note**: The API is under development. 🚧
+
+---
+
+**Automatic, hardware-aware install**
+
+There is a helper installer that detects your hardware and installs the best-matching requirements (pins `protobuf` for compatibility):
+
+- Auto-detect and install (recommended):
+
+```bash
+python scripts/install.py --auto
+```
+
+- Force Intel-optimized build:
+
+```bash
+python scripts/install.py --intel
+```
+
+- Force generic CPU build:
+
+```bash
+python scripts/install.py --cpu
+```
+
+- Force GPU build (ensure CUDA/cuDNN installed):
+
+```bash
+python scripts/install.py --gpu
+```
+
+Internally the script uses `constraints.txt` to pin `protobuf` to a compatible version.
+
+Note: Streamlit (UI) depends on a newer `protobuf` than TensorFlow 2.11 allows. To avoid conflicts we split packages:
+
+- Core/training dependencies: `requirements-core.txt` (used by hardware-specific installs)
+- UI dependencies: `requirements-ui.txt` (install separately if you want the Streamlit app)
+
+Install the UI into a separate virtual environment:
+
+```bash
+python -m venv .venv-ui
+.venv-ui\Scripts\activate
+pip install -r requirements-ui.txt
+```
 
 ---
 

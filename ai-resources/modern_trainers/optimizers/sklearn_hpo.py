@@ -136,7 +136,7 @@ class SklearnHPOTrainer:
                 'params': {'model__alpha': [0.1, 0.5, 1.0, 2.0]}
             },
             'XGBoost': {
-                'estimator': XGBClassifier(random_state=self.random_state, use_label_encoder=False, eval_metric='logloss'),
+                'estimator': XGBClassifier(random_state=self.random_state, eval_metric='logloss'),
                 'params': {
                     'model__n_estimators': [50, 100, 200],
                     'model__learning_rate': [0.01, 0.1, 0.5],
@@ -177,8 +177,11 @@ class SklearnHPOTrainer:
                 'requires_text': False
             },
             'TruncatedSVD': {
-                'step': TruncatedSVD(n_components=100, random_state=self.random_state),
-                'requires_text': False
+                'step': Pipeline([
+                    ('tfidf', TfidfVectorizer(max_features=5000, stop_words='english')),
+                    ('svd', TruncatedSVD(n_components=100, random_state=self.random_state)),
+                ]),
+                'requires_text': True
             }
         }
     
@@ -202,6 +205,11 @@ class SklearnHPOTrainer:
         
         models = models or list(all_models.keys())
         preprocessors = preprocessors or list(all_preprocessors.keys())
+
+        # Password datasets are text by default, so keep only text-compatible preprocessors.
+        is_text_input = len(X) > 0 and isinstance(X[0], str)
+        if is_text_input:
+            preprocessors = [p for p in preprocessors if all_preprocessors[p].get('requires_text', False)]
         
         results = []
         best_auc = -1
