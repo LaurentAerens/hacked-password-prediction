@@ -97,6 +97,8 @@ class PasswordNNTrainer:
         epochs: int = 20,
         batch_size: Optional[int] = None,
         learning_rate: float = 0.001,
+        hidden_dim: int = 64,
+        dropout: float = 0.2,
         val_split: float = 0.2,
         control_signal: Optional[ControlSignal] = None,
         telemetry_emitter: Optional[TelemetryEmitter] = None,
@@ -110,6 +112,8 @@ class PasswordNNTrainer:
             epochs: Number of training epochs
             batch_size: Batch size (auto-detected if None)
             learning_rate: Learning rate for optimizer
+            hidden_dim: Hidden layer dimension for PasswordCNN
+            dropout: Dropout rate for PasswordCNN
             val_split: Validation split fraction
             control_signal: Optional ControlSignal for pause/resume/stop
             telemetry_emitter: Optional TelemetryEmitter for progress events
@@ -157,7 +161,7 @@ class PasswordNNTrainer:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         
         # Create model, optimizer, loss
-        model = PasswordCNN().to(self.device)
+        model = PasswordCNN(hidden_dim=hidden_dim, dropout=dropout).to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         loss_fn = nn.BCEWithLogitsLoss()
         
@@ -173,7 +177,9 @@ class PasswordNNTrainer:
                     "model_size": model.num_params,
                     "batch_size": batch_size,
                     "device": self.device.type,
-                    "epochs": epochs
+                    "epochs": epochs,
+                    "hidden_dim": hidden_dim,
+                    "dropout": dropout,
                 }
             )
         
@@ -275,14 +281,16 @@ class PasswordNNTrainer:
         # Save best model
         architecture_config = {
             "embedding_dim": 8,
-            "hidden_dim": 64,
-            "dropout": 0.2,
+            "hidden_dim": hidden_dim,
+            "dropout": dropout,
             "kernel_sizes": [2, 3, 4]
         }
         training_config = {
             "epochs": epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
+            "hidden_dim": hidden_dim,
+            "dropout": dropout,
             "val_split": val_split
         }
         best_metrics = {"val_loss": float(best_val_loss), "val_acc": float(history["val_acc"][best_epoch])}
@@ -333,6 +341,8 @@ class PasswordNNTrainer:
         num_batches = 0
         
         for batch_x, batch_y in train_loader:
+            batch_x = batch_x.to(self.device)
+            batch_y = batch_y.to(self.device)
             optimizer.zero_grad()
             
             # Forward pass
@@ -357,6 +367,8 @@ class PasswordNNTrainer:
         
         with torch.no_grad():
             for batch_x, batch_y in val_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
                 logits = model(batch_x)
                 loss = loss_fn(logits, batch_y)
                 total_loss += loss.item()

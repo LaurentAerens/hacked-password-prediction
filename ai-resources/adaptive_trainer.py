@@ -16,7 +16,8 @@ import numpy as np
 import optuna
 from datetime import datetime
 from typing import Dict, Optional, List, Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import joblib
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.model_selection import ParameterGrid
@@ -24,9 +25,100 @@ from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
 
 from modern_trainers.optimizers.sklearn_hpo import SklearnHPOTrainer
+from gpu_utils import GPUDetector, print_gpu_info
 from shared_lib.telemetry_emitter import TelemetryEmitter
 from shared_lib.control_signal import ControlSignal
 from shared_lib.checkpoint_manager import CheckpointManager
+
+
+def _generate_mini_validation_dataset(size: int = 100, num_real: int = 10) -> tuple:
+    """Generate mini dataset: real passwords from dataset + generated passwords.
+    
+    Balances into 50/50 weak/strong split. Takes N real cracked passwords from
+    combined_data.csv and generates (size - N) additional passwords using the
+    data generation tool.
+    
+    Args:
+        size: Total samples to generate (balanced 50/50 weak/strong)
+        num_real: Number of real passwords from CSV to use (default 10)
+    
+    Returns:
+        (X, y) tuple with mixed passwords and balanced labels (0=weak, 1=strong)
+    """
+    import random
+    import string
+    import os
+    
+    # Step 1: Load real cracked passwords from combined_data.csv
+    real_weak_passwords = []
+    csv_path = os.path.join(os.path.dirname(__file__), 'data', 'combined_data.csv')
+    
+    try:
+        df = pd.read_csv(csv_path)
+        # Cracked passwords from CSV (target=1) are real weak passwords
+        real_weak_passwords = df[df['target'] == 1]['password'].head(num_real).tolist()
+        print(f"[Mini Dataset] Loaded {len(real_weak_passwords)} real cracked passwords from {csv_path}")
+    except Exception as e:
+        print(f"[Mini Dataset] Warning: Could not load real passwords: {e}")
+        real_weak_passwords = []
+    
+    # Step 2: Generate additional passwords using the data generation tool
+    from data_generation import generate_negative_samples
+    
+    num_to_generate = size - len(real_weak_passwords)
+    generated_passwords = []
+    
+    try:
+        if num_to_generate > 0:
+            max_length = max(len(p) for p in real_weak_passwords) if real_weak_passwords else 20
+            generated_passwords = generate_negative_samples(
+                num_to_generate,
+                set(real_weak_passwords),
+                max_length
+            )
+            print(f"[Mini Dataset] Generated {len(generated_passwords)} passwords using data generation tool")
+    except Exception as e:
+        print(f"[Mini Dataset] Warning: Could not generate passwords with data generation tool: {e}")
+        generated_passwords = []
+    
+    # Step 3: Combine and create weak/strong split
+    weak_passwords = real_weak_passwords + generated_passwords
+    
+    # If we don't have enough generated passwords, create synthetic ones as fallback
+    fallback_strong_patterns = [
+        "K8@mPq!2xR", "9#Lw$vN4pM", "X5&yQz@1tU", "B7*jC2%hJ9", "D4+kF6^sL8",
+        "V3=nW1-eO5", "G2|cH8&qT6", "S4(rI9)aP7", "Z1{uJ3}mE2", "F5[xK7]bY4"
+    ]
+    
+    # Generate strong passwords if needed
+    target_per_class = size // 2
+    strong_passwords = []
+    
+    for pattern in fallback_strong_patterns:
+        if len(strong_passwords) >= target_per_class:
+            break
+        strong_passwords.append(pattern)
+    
+    # Fill remaining strong passwords with synthetic ones
+    while len(strong_passwords) < target_per_class:
+        pwd = ''.join(random.choices(
+            string.ascii_letters + string.digits + '!@#$%^&*', 
+            k=random.randint(10, 16)
+        ))
+        if pwd not in strong_passwords:
+            strong_passwords.append(pwd)
+    
+    # Step 4: Balance and create final dataset
+    X = weak_passwords[:target_per_class] + strong_passwords[:target_per_class]
+    y = [0] * target_per_class + [1] * target_per_class  # 0=weak, 1=strong
+    
+    # Shuffle
+    combined = list(zip(X, y))
+    random.shuffle(combined)
+    X, y = zip(*combined)
+    
+    print(f"[Mini Dataset] Created balanced dataset: {len(X)} samples (50% weak, 50% strong)")
+    return list(X), list(y)
 
 
 def _detect_total_ram_gb() -> Optional[float]:
@@ -68,8 +160,12 @@ def _resolve_parallel_plan(
     ram_per_candidate_gb: float,
     cpu_utilization_target: float,
     allow_candidate_parallelism: bool,
+    fast_mode: bool = False,
 ) -> Dict[str, int]:
     """Compute a resource-aware parallel plan for adaptive search.
+    
+    For high-core systems (>8 cores), prioritizes deep parallelism (full n_jobs per candidate)
+    over breadth (many concurrent candidates).
 
     Returns:
         dict with keys `cpu_budget`, `outer_workers`, `inner_n_jobs`.
@@ -80,7 +176,12 @@ def _resolve_parallel_plan(
     cpu_budget = max(1, min(cpu_total, int(requested_budget * cpu_target)))
 
     if total_candidates <= 1 or not allow_candidate_parallelism:
-        return {"cpu_budget": cpu_budget, "outer_workers": 1, "inner_n_jobs": cpu_budget}
+        return {
+            "cpu_budget": cpu_budget,
+            "outer_workers": 1,
+            "inner_n_jobs": cpu_budget,
+            "strategy": "single_candidate"
+        }
 
     total_ram_gb = _detect_total_ram_gb()
     if total_ram_gb is None or ram_per_candidate_gb <= 0:
@@ -88,9 +189,18 @@ def _resolve_parallel_plan(
     else:
         mem_limited_workers = max(1, int(total_ram_gb / ram_per_candidate_gb))
 
-    cpu_limited_workers = cpu_budget
-    if mean_trials <= 8 and cv_folds <= 2:
-        cpu_limited_workers = max(1, min(cpu_budget, cpu_budget // 2 or 1))
+    # IMPROVED HEURISTICS FOR HIGH-CORE SYSTEMS
+    # On Ryzen 9 7950X (16 cores), use deep parallelism instead of spreading thin
+    if cpu_total >= 12:  # High-core system
+        # Strategy: Few candidates with deep parallelism
+        cpu_limited_workers = max(1, min(4, cpu_budget // 4))  # At most 4 concurrent candidates
+        if fast_mode:
+            cpu_limited_workers = max(1, min(2, cpu_budget // 8))  # Even fewer in fast mode
+    else:
+        # Low-core system: balance breadth and depth
+        cpu_limited_workers = cpu_budget
+        if mean_trials <= 8 and cv_folds <= 2:
+            cpu_limited_workers = max(1, min(cpu_budget, cpu_budget // 2 or 1))
 
     outer_cap = min(total_candidates, mem_limited_workers, cpu_limited_workers)
     if max_parallel_candidates is not None:
@@ -98,10 +208,16 @@ def _resolve_parallel_plan(
 
     outer_workers = max(1, outer_cap)
     inner_n_jobs = max(1, cpu_budget // outer_workers)
+    
+    # Determine strategy for diagnostics
+    strategy = "candidate_parallel" if outer_workers > 1 else "exhaustive_parallel"
+    
     return {
         "cpu_budget": cpu_budget,
         "outer_workers": outer_workers,
         "inner_n_jobs": inner_n_jobs,
+        "strategy": strategy,
+        "cpu_total": cpu_total,
     }
 
 
@@ -366,7 +482,11 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                                phase2_trials_per_model: int = 20,
                                max_parallel_candidates: Optional[int] = None,
                                ram_per_candidate_gb: float = 2.0,
-                               cpu_utilization_target: float = 0.9) -> Dict:
+                               cpu_utilization_target: float = 0.9,
+                               fast_mode: bool = False,
+                               mini_dataset: bool = False,
+                               mini_dataset_size: int = 100,
+                               gpu_device: str = 'auto') -> Dict:
     """
     Adaptive hyperparameter optimization (like Azure AutoML).
     
@@ -394,11 +514,22 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
         max_parallel_candidates: Optional cap for concurrent model+preprocessor jobs.
         ram_per_candidate_gb: Estimated RAM budget per concurrent candidate.
         cpu_utilization_target: Fraction of requested CPUs to actively use (0.2-1.0).
+        fast_mode: Use reduced hyperparameter grids for quick iteration (default: False).
+        mini_dataset: Use tiny dataset for quick validation (default: False).
+        mini_dataset_size: Size of mini dataset to generate (default: 100 samples, 10 real + 90 generated).
+        gpu_device: GPU device to use - 'auto' (detect), 'cuda', 'rocm', 'mps', 'cpu' (default: 'auto').
         
     Returns:
         Dictionary with best_model, results_df, experiment_name, metrics
     """
-    trainer = SklearnHPOTrainer(random_state=random_state, n_jobs=n_jobs)
+    # Generate mini dataset if requested for quick validation or if X is empty
+    if mini_dataset or (not X or len(X) == 0):
+        print(f"\n[MINI DATASET] Using {mini_dataset_size}-sample balanced dataset (10 real + {mini_dataset_size-10} generated)")
+        X, y = _generate_mini_validation_dataset(size=mini_dataset_size, num_real=min(10, mini_dataset_size))
+        mini_dataset = True  # Ensure mini_dataset flag is set
+    
+    trainer = SklearnHPOTrainer(random_state=random_state, n_jobs=n_jobs, fast_mode=fast_mode, 
+                               gpu_device=gpu_device, mini_dataset=mini_dataset)
     all_models = trainer._get_models()
     all_preprocessors = trainer._get_preprocessors()
 
@@ -492,6 +623,7 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
         ram_per_candidate_gb=ram_per_candidate_gb,
         cpu_utilization_target=cpu_utilization_target,
         allow_candidate_parallelism=(control_signal is None),
+        fast_mode=fast_mode,
     )
 
     emitter.emit_event(
@@ -511,8 +643,11 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
 
     print(
         f"Parallel plan: workers={parallel_plan['outer_workers']} | "
-        f"grid_n_jobs={parallel_plan['inner_n_jobs']} | cpu_budget={parallel_plan['cpu_budget']}"
+        f"grid_n_jobs={parallel_plan['inner_n_jobs']} | cpu_budget={parallel_plan['cpu_budget']} | "
+        f"strategy={parallel_plan.get('strategy', 'default')} ({parallel_plan.get('cpu_total', 'unknown')} cores)"
     )
+    if fast_mode:
+        print("⚡ FAST MODE: Reduced hyperparameter grids for quick iteration")
     
     def _run_phase1_candidate(prep_name: str, model_name: str) -> Dict:
         preprocessor = all_preprocessors[prep_name]
@@ -633,6 +768,8 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                         }
                     }
     else:
+        # ThreadPoolExecutor coordinates candidates; GridSearchCV uses loky for true parallelism
+        from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=parallel_plan['outer_workers']) as executor:
             futures = {
                 executor.submit(_run_phase1_candidate, prep_name, model_name): (prep_name, model_name)

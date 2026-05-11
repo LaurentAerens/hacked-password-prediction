@@ -23,7 +23,12 @@ import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
 import streamlit as st
-import torch
+
+# Try to import torch (optional, for backward compatibility)
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # Allow imports from ai-resources when launched from repository root.
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,7 +36,14 @@ sys.path.insert(0, str(BASE_DIR))
 
 from adaptive_trainer import train_with_adaptive_search
 from data_generation import generate_data
-from nn_trainer import PasswordNNTrainer
+from gpu_utils import GPUDetector
+
+# Try to import nn_trainer (optional, requires torch)
+try:
+    from nn_trainer import PasswordNNTrainer
+except ImportError:
+    PasswordNNTrainer = None
+
 from shared_lib.telemetry_emitter import TelemetryEmitter
 from shared_lib.data_utils import get_data
 from shared_lib.realtime_dashboard import RealtimeDashboardState
@@ -44,6 +56,7 @@ from model_comparison import ModelComparison
 
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
+ROOT_MODELS_DIR = BASE_DIR.parent / "models"
 RESULTS_DIR = BASE_DIR / "results"
 
 EVENTS_CSV = DATA_DIR / "events.csv"
@@ -296,7 +309,11 @@ def _run_training(top_percent: float, cv_folds: int,
                  progress_callback: Optional[Callable] = None,
                  run_id: Optional[str] = None,
                  control_signal: Optional[ControlSignal] = None,
-                 checkpoint_manager: Optional[CheckpointManager] = None) -> tuple[dict, str]:
+                 checkpoint_manager: Optional[CheckpointManager] = None,
+                 fast_mode: bool = False,
+                 mini_dataset: bool = False,
+                 mini_dataset_size: int = 100,
+                 gpu_device: str = 'auto') -> tuple[dict, str]:
     """
     Run training with optional progress callback and control signal for pause/stop.
     
@@ -345,6 +362,10 @@ def _run_training(top_percent: float, cv_folds: int,
             max_parallel_candidates=max_parallel_candidates,
             ram_per_candidate_gb=ram_per_candidate_gb,
             cpu_utilization_target=cpu_utilization_target,
+            fast_mode=fast_mode,
+            mini_dataset=mini_dataset,
+            mini_dataset_size=mini_dataset_size,
+            gpu_device=gpu_device,
         )
 
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -383,6 +404,10 @@ def _training_worker(
     checkpoint_manager: CheckpointManager,
     dashboard_state: RealtimeDashboardState,
     job_state: dict,
+    fast_mode: bool = False,
+    mini_dataset: bool = False,
+    mini_dataset_size: int = 100,
+    gpu_device: str = 'auto',
 ) -> None:
     """Background worker that runs training and stores outputs in job_state."""
 
@@ -403,6 +428,10 @@ def _training_worker(
             run_id=run_id,
             control_signal=control_signal,
             checkpoint_manager=checkpoint_manager,
+            fast_mode=fast_mode,
+            mini_dataset=mini_dataset,
+            mini_dataset_size=mini_dataset_size,
+            gpu_device=gpu_device,
         )
         job_state["result"] = result
         job_state["logs"] = logs
@@ -440,7 +469,11 @@ def _nn_training_worker(
     job_state: dict,
 ) -> None:
     """Background worker for NN training. Runs in thread, updates job_state."""
+    import traceback
     try:
+        if PasswordNNTrainer is None:
+            raise ImportError("torch is required for Neural Network Training. Install pytorch to enable this feature.")
+        
         trainer = PasswordNNTrainer()
         
         result = trainer.train(
@@ -449,6 +482,8 @@ def _nn_training_worker(
             epochs=config["epochs"],
             batch_size=config["batch_size"],
             learning_rate=config["learning_rate"],
+            hidden_dim=config["hidden_dim"],
+            dropout=config["dropout"],
             control_signal=control_signal,
             telemetry_emitter=telemetry_emitter,
         )
@@ -456,7 +491,9 @@ def _nn_training_worker(
         job_state["result"] = result
         job_state["status"] = "completed"
     except Exception as exc:
-        job_state["error"] = str(exc)
+        full_traceback = traceback.format_exc()
+        print(f"[NN Training Error]\n{full_traceback}", flush=True)
+        job_state["error"] = full_traceback
         job_state["status"] = "failed"
     finally:
         job_state["done"] = True
@@ -477,6 +514,47 @@ def _predict_with_model(model, password: str) -> tuple[int, float | None]:
         return pred, confidence
 
     return pred, None
+
+
+def _get_latest_available_models() -> dict[str, str]:
+    """Return latest available model paths keyed by display label."""
+    available: dict[str, str] = {}
+
+    if MODEL_FILE.exists():
+        available["Phase 1 (Adaptive)"] = str(MODEL_FILE)
+
+    model_roots = [MODELS_DIR]
+    if ROOT_MODELS_DIR != MODELS_DIR:
+        model_roots.append(ROOT_MODELS_DIR)
+
+    for model_root in model_roots:
+        try:
+            registry = UnifiedModelRegistry(base_dir=str(model_root))
+            latest = registry.get_latest_models()
+        except Exception:
+            continue
+
+        phase2_model = latest.get("phase2", {}).get("path")
+        if phase2_model and "Phase 2 (Optuna)" not in available:
+            available["Phase 2 (Optuna)"] = str(phase2_model)
+
+        nn_model = latest.get("nn", {}).get("path")
+        if nn_model and "Neural Network" not in available:
+            available["Neural Network"] = str(nn_model)
+
+    return available
+
+
+def _predict_with_nn_model(nn_model_path: str, password: str) -> tuple[int, float]:
+    """Run single-password prediction with NN via EnsemblePredictor wrapper."""
+    ensemble = EnsemblePredictor()
+    ensemble.load_nn_model(nn_model_path)
+
+    proba = ensemble.predict_proba(pd.Series([password]))[0]
+    hacked_proba = float(proba[1])
+    pred = int(hacked_proba >= 0.5)
+    confidence = hacked_proba if pred == 1 else float(proba[0])
+    return pred, confidence
 
 
 def _show_nn_training_tab() -> None:
@@ -638,7 +716,9 @@ def _show_nn_training_tab() -> None:
                 status_emoji = {"RUNNING": "🟢", "PAUSED": "🟡", "STOPPED": "🔴"}.get(state, "⚪")
                 st.metric("Status", f"{status_emoji} {state}")
             with col_device:
-                device = "GPU" if torch.cuda.is_available() else "CPU"
+                # Use GPU detection utility instead of torch
+                is_gpu_available, gpu_type = GPUDetector.detect_gpu_availability()
+                device = gpu_type.upper() if is_gpu_available else "CPU"
                 st.metric("Device", device)
             
             # Epoch progress bar
@@ -660,16 +740,20 @@ def _show_nn_training_tab() -> None:
             
             # Event log
             st.markdown("### Event Log")
-            event_log_text = "\n".join([
-                f"[{e.get('emitted_at', '')}] {e.get('event_type', 'unknown')}"
-                for e in events[-10:]
-            ])
-            if event_log_text:
+            if events and len(events) > 0:
+                event_log_text = "\n".join([
+                    f"[{e.get('emitted_at', 'N/A')}] {e.get('event_type', 'unknown')} ({e.get('status', '')})"
+                    for e in events[-15:]
+                ])
                 st.code(event_log_text, language="text")
-        
-        # Keep UI live
-        time.sleep(1)
-        st.rerun()
+            else:
+                st.info("⏳ Waiting for training events...")
+            
+            # Keep UI live with shorter sleep for responsiveness
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.info("⏳ Initializing training emitter...")
     
     # Check if training completed
     if st.session_state.get("nn_training_job"):
@@ -762,7 +846,7 @@ def _show_nn_training_tab() -> None:
                 "Synthetic / Negative": "#118ab2",
             },
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     st.markdown('<div class="harp-card"><strong>Fast Start</strong><br/>1) Generate dataset<br/>2) Train Adaptive Phase 1 model<br/>3) Score passwords in Predict tab</div>', unsafe_allow_html=True)
 
@@ -963,6 +1047,41 @@ def _show_training_tab() -> None:
         st.warning("Combined dataset not found. Run Data Generation first.")
         return
 
+    # ⚡ Quick Training Options (prominent at top)
+    st.markdown("### ⚡ Quick Training Options")
+    quick_col1, quick_col2 = st.columns(2)
+    
+    with quick_col1:
+        fast_mode = st.checkbox(
+            "🚀 Fast Mode",
+            value=False,
+            help="Use 2-3 values per hyperparameter instead of 3-6. ~2x faster with slightly lower accuracy. Ideal for quick iteration.",
+        )
+    
+    with quick_col2:
+        use_mini_dataset = st.checkbox(
+            "📊 Mini Dataset",
+            value=False,
+            help="Use smaller dataset for quick validation. Completes in 30 seconds.",
+        )
+    
+    # Show mini dataset size slider if mini dataset is selected
+    if use_mini_dataset:
+        mini_dataset_size = st.slider(
+            "Mini dataset size (samples)",
+            min_value=10,
+            max_value=500,
+            value=100,
+            step=10,
+            help="Number of balanced samples (50/50 weak/strong passwords) for quick validation.",
+        )
+        mini_dataset = True
+    else:
+        mini_dataset_size = 100  # Default size when not using mini dataset
+        mini_dataset = False
+
+    # Standard training parameters
+    st.markdown("### Training Configuration")
     top_percent = st.slider("Top candidates to advance", min_value=0.05, max_value=0.50, value=0.20, step=0.05)
     cv_folds = st.selectbox("Full CV folds", options=[3, 4, 5], index=2)
     run_phase2 = st.checkbox("Run Phase 2 Optuna fine-tuning", value=True)
@@ -995,6 +1114,29 @@ def _show_training_tab() -> None:
             help="Set 0 to let the scheduler choose automatically based on CPU and RAM.",
         )
         max_parallel_candidates = None if int(max_parallel_candidates_raw) == 0 else int(max_parallel_candidates_raw)
+        
+        # GPU acceleration options
+        st.markdown("**GPU Acceleration**")
+        
+        is_gpu_available, gpu_type = GPUDetector.detect_gpu_availability()
+        if is_gpu_available:
+            gpu_status = f"✅ GPU Available ({gpu_type.upper()})"
+            device_options = ['auto', gpu_type, 'cpu']
+        else:
+            gpu_status = "❌ No GPU detected (will use CPU)"
+            device_options = ['cpu']
+        
+        st.info(gpu_status)
+        
+        # Determine default index (always first option: 'auto' or 'cpu')
+        default_index = 0
+        
+        gpu_device = st.selectbox(
+            "Device for GPU-accelerated models",
+            options=device_options,
+            index=default_index,
+            help="XGBoost and LightGBM can use GPU for 3-5x speedup. 'auto' detects CUDA/ROCm/MPS automatically.",
+        )
 
     # Initialize realtime dashboard state if not already present
     if "training_run_id" not in st.session_state:
@@ -1051,6 +1193,10 @@ def _show_training_tab() -> None:
                 "checkpoint_manager": checkpoint_manager,
                 "dashboard_state": dashboard_state,
                 "job_state": job_state,
+                "fast_mode": fast_mode,
+                "mini_dataset": mini_dataset,
+                "mini_dataset_size": mini_dataset_size,
+                "gpu_device": gpu_device,
             },
             daemon=True,
         )
@@ -1251,7 +1397,7 @@ def _show_training_tab() -> None:
         # Results table and chart
         results_df = result["results_df"].copy()
         if not results_df.empty:
-            st.dataframe(results_df.head(25), use_container_width=True)
+            st.dataframe(results_df.head(25), width='stretch')
             
             # Top combinations chart
             chart = px.bar(
@@ -1264,12 +1410,12 @@ def _show_training_tab() -> None:
                 color_continuous_scale="Viridis",
             )
             chart.update_layout(yaxis_title="Combination", xaxis_title="AUC")
-            st.plotly_chart(chart, use_container_width=True)
+            st.plotly_chart(chart, width='stretch')
 
         phase2_df = result.get("phase2_results_df")
         if phase2_df is not None and not phase2_df.empty:
             st.markdown("#### 🔬 Phase 2 Fine-Tuning Results")
-            st.dataframe(phase2_df.head(20), use_container_width=True)
+            st.dataframe(phase2_df.head(20), width='stretch')
 
             best_phase2 = phase2_df.iloc[0]
             st.success(
@@ -1386,7 +1532,7 @@ def _show_data_explorer() -> None:
             xaxis=dict(showgrid=False, showticklabels=False, title=""),
             yaxis=dict(title=""),
         )
-        st.plotly_chart(bar_fig, use_container_width=True)
+        st.plotly_chart(bar_fig, width='stretch')
         if filtered_count > 0:
             lc1, lc2, lc3 = st.columns(3)
             lc1.metric("Avg length", round(df_filtered["length"].mean(), 1), delta_color="off")
@@ -1407,7 +1553,7 @@ def _show_data_explorer() -> None:
 
     st.dataframe(
         df_display,
-        use_container_width=True,
+        width='stretch',
         height=420,
         hide_index=True,
         column_config={
@@ -1433,13 +1579,22 @@ def _show_data_explorer() -> None:
 
 
 def _show_predict_tab() -> None:
-    st.subheader("Predict Password Risk")
+    st.subheader("🪉 Predict Password Risk")
 
-    if not MODEL_FILE.exists():
-        st.warning("No trained model found yet. Train Phase 1 first.")
+    available_models = _get_latest_available_models()
+    if not available_models:
+        st.warning("No trained models found yet. Train Phase 1, Phase 2, or NN first.")
         return
 
-    model = joblib.load(MODEL_FILE)
+    model_choice = st.selectbox(
+        "Model to use",
+        options=list(available_models.keys()),
+        index=0,
+        key="predict_model_choice",
+    )
+    selected_model_path = available_models[model_choice]
+    st.caption(f"Using: {selected_model_path}")
+
     password = st.text_input("Password to evaluate", value="")
 
     if st.button("Predict", type="primary"):
@@ -1447,7 +1602,14 @@ def _show_predict_tab() -> None:
             st.info("Enter a password first.")
             return
 
-        pred, confidence = _predict_with_model(model, password.strip())
+        clean_password = password.strip()
+
+        if model_choice == "Neural Network":
+            pred, confidence = _predict_with_nn_model(selected_model_path, clean_password)
+        else:
+            model = joblib.load(selected_model_path)
+            pred, confidence = _predict_with_model(model, clean_password)
+
         if pred == 1:
             st.error("Prediction: HIGH RISK")
         else:
@@ -1490,7 +1652,7 @@ def _show_comparison_tab() -> None:
     else:
         # Metrics table
         st.markdown("### Performance Metrics")
-        st.dataframe(comp_df, use_container_width=True)
+        st.dataframe(comp_df, width='stretch')
         
         # Best model highlight
         st.markdown("### Best Model")
@@ -1501,7 +1663,7 @@ def _show_comparison_tab() -> None:
         # Comparison chart
         st.markdown("### Metrics Comparison")
         fig = comparison.plot_comparison()
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         # Ensemble configuration
         st.markdown("### Ensemble Configuration")
@@ -1571,7 +1733,7 @@ def _show_comparison_tab() -> None:
                             "Prediction": ["Hacked" if p else "Safe" for p in preds[:10]]
                         })
                         
-                        st.dataframe(result_df, use_container_width=True)
+                        st.dataframe(result_df, width='stretch')
                     except Exception as e:
                         st.error(f"Error making predictions: {e}")
                 else:
@@ -1590,9 +1752,15 @@ def main() -> None:
     _inject_styles()
 
     st.sidebar.title("🪉 H.A.R.P. v2")
+    
+    # Build page list - exclude Neural Network Training if torch is not available
+    pages = ["Overview", "Data Explorer", "Data Generation", "Adaptive Training", "Comparison", "Predict"]
+    if PasswordNNTrainer is not None:
+        pages.insert(4, "Neural Network Training")
+    
     page = st.sidebar.radio(
         "Navigate",
-        ["Overview", "Data Explorer", "Data Generation", "Adaptive Training", "Neural Network Training", "Comparison", "Predict"],
+        pages,
     )
 
     st.sidebar.markdown("---")

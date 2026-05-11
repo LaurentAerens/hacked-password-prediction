@@ -24,6 +24,7 @@ class PasswordTokenizer:
         """
         self.max_length = max_length
         self.embedding_dim = embedding_dim
+        self.device = torch.device('cpu')
         # Create embedding layer for ASCII codes (0-255)
         self.embedding_layer = nn.Embedding(256, embedding_dim, padding_idx=0)
 
@@ -37,13 +38,19 @@ class PasswordTokenizer:
         Returns:
             Tensor of shape (1, max_length, embedding_dim)
         """
+        # Handle NaN and non-string types
+        if password is None or (isinstance(password, float) and password != password):  # NaN check
+            password = ""
+        else:
+            password = str(password)
+        
         # Convert password to ASCII codes, truncate/pad to max_length
         ascii_codes = [min(ord(c), 255) for c in password[:self.max_length]]
         # Pad with 0s to reach max_length
         ascii_codes += [0] * (self.max_length - len(ascii_codes))
         
         # Convert to tensor and embed
-        token_tensor = torch.tensor(ascii_codes, dtype=torch.long)
+        token_tensor = torch.tensor(ascii_codes, dtype=torch.long, device=self.device)
         embedded = self.embedding_layer(token_tensor)  # (max_length, embedding_dim)
         return embedded.unsqueeze(0)  # (1, max_length, embedding_dim)
 
@@ -52,7 +59,7 @@ class PasswordTokenizer:
         Encode batch of passwords.
         
         Args:
-            passwords: List of password strings
+            passwords: List of password strings or items
             
         Returns:
             Tensor of shape (batch_size, max_length, embedding_dim)
@@ -60,8 +67,16 @@ class PasswordTokenizer:
         if len(passwords) == 0:
             return torch.empty((0, self.max_length, self.embedding_dim), dtype=torch.float32)
         
-        batch = []
+        # Clean batch: convert NaN and non-string types to empty strings
+        cleaned_passwords = []
         for password in passwords:
+            if password is None or (isinstance(password, float) and password != password):  # NaN check
+                cleaned_passwords.append("")
+            else:
+                cleaned_passwords.append(str(password))
+        
+        batch = []
+        for password in cleaned_passwords:
             # Use encode and squeeze the batch dimension
             encoded = self.encode(password).squeeze(0)  # (max_length, embedding_dim)
             batch.append(encoded)
@@ -76,5 +91,6 @@ class PasswordTokenizer:
 
     def to(self, device):
         """Move embedding layer to device."""
+        self.device = device
         self.embedding_layer = self.embedding_layer.to(device)
         return self

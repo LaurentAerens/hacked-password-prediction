@@ -11,6 +11,7 @@ Features:
 - CSV export of all trials
 - Reproducible results (seed control)
 - Local parallelization (n_jobs=-1)
+- GPU acceleration support (XGBoost, LightGBM on CUDA/ROCm/MPS)
 """
 
 import os
@@ -26,6 +27,7 @@ from sklearn.metrics import (
     roc_auc_score, accuracy_score, precision_score, recall_score, 
     f1_score, confusion_matrix
 )
+import joblib
 
 # Models
 from sklearn.linear_model import LogisticRegression
@@ -49,27 +51,133 @@ from sklearn.preprocessing import (
 )
 from sklearn.decomposition import PCA, TruncatedSVD
 
+# GPU support
+from gpu_utils import GPUTrainerConfig, GPUDetector
+
 
 class SklearnHPOTrainer:
-    """Systematic hyperparameter optimization using GridSearchCV."""
+    """Systematic hyperparameter optimization using GridSearchCV with GPU support."""
     
-    def __init__(self, random_state: int = 42, n_jobs: int = -1):
+    def __init__(self, random_state: int = 42, n_jobs: int = -1, fast_mode: bool = False, 
+                 gpu_device: str = 'auto', mini_dataset: bool = False):
         """
         Initialize trainer.
         
         Args:
             random_state: Seed for reproducibility (default: 42)
             n_jobs: Number of parallel jobs (-1 = all cores, default: -1)
+            fast_mode: Use reduced hyperparameter grids for quick validation (default: False)
+            gpu_device: GPU device to use - 'auto' (detect), 'cuda', 'rocm', 'mps', 'cpu' (default: 'auto')
+            mini_dataset: Use restricted preprocessors for small datasets (default: False)
         """
         self.random_state = random_state
         self.n_jobs = n_jobs
+        self.fast_mode = fast_mode
+        self.mini_dataset = mini_dataset
+        self.gpu_config = GPUTrainerConfig(device=gpu_device)
         self.best_model = None
         self.best_params = None
         self.cv_results = None
         self.experiment_name = None
         
     def _get_models(self) -> Dict:
-        """Get model definitions with hyperparameter grids."""
+        """Get model definitions with hyperparameter grids.
+        
+        In fast_mode, uses minimal grids for quick iteration.
+        """
+        if self.fast_mode:
+            # FAST MODE: 2-3 values per param instead of 3-6
+            return {
+                'LogisticRegression': {
+                    'estimator': LogisticRegression(max_iter=1000, random_state=self.random_state),
+                    'params': {'model__C': [0.1, 1, 10]}
+                },
+                'RandomForest': {
+                    'estimator': RandomForestClassifier(random_state=self.random_state, n_jobs=1),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__max_depth': [10, 30],
+                    }
+                },
+                'GradientBoosting': {
+                    'estimator': GradientBoostingClassifier(random_state=self.random_state),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__learning_rate': [0.1, 0.5],
+                        'model__max_depth': [5, 7]
+                    }
+                },
+                'SVM': {
+                    'estimator': SVC(random_state=self.random_state, probability=True),
+                    'params': {
+                        'model__C': [1, 100],
+                        'model__kernel': ['linear']
+                    }
+                },
+                'LinearSVM': {
+                    'estimator': LinearSVC(random_state=self.random_state, max_iter=2000),
+                    'params': {'model__C': [0.1, 1, 10]}
+                },
+                'KNeighbors': {
+                    'estimator': KNeighborsClassifier(),
+                    'params': {'model__n_neighbors': [5, 11]}
+                },
+                'DecisionTree': {
+                    'estimator': DecisionTreeClassifier(random_state=self.random_state),
+                    'params': {
+                        'model__max_depth': [10, 20],
+                        'model__min_samples_split': [2, 5]
+                    }
+                },
+                'AdaBoost': {
+                    'estimator': AdaBoostClassifier(random_state=self.random_state),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__learning_rate': [0.1, 0.5]
+                    }
+                },
+                'ExtraTrees': {
+                    'estimator': ExtraTreesClassifier(random_state=self.random_state, n_jobs=1),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__max_depth': [10, 20]
+                    }
+                },
+                'Bagging': {
+                    'estimator': BaggingClassifier(random_state=self.random_state, n_jobs=1),
+                    'params': {'model__n_estimators': [50, 100]}
+                },
+                'MultinomialNB': {
+                    'estimator': MultinomialNB(),
+                    'params': {'model__alpha': [0.5, 1.0]}
+                },
+                'XGBoost': {
+                    'estimator': XGBClassifier(
+                        random_state=self.random_state, 
+                        eval_metric='logloss',
+                        **self.gpu_config.get_xgboost_params()
+                    ),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__learning_rate': [0.1, 0.5],
+                        'model__max_depth': [5, 7]
+                    }
+                },
+                'LightGBM': {
+                    'estimator': lgbm.LGBMClassifier(
+                        random_state=self.random_state,
+                        verbose=-1,
+                        **self.gpu_config.get_lightgbm_params()
+                    ),
+                    'params': {
+                        'model__n_estimators': [100, 200],
+                        'model__learning_rate': [0.1, 0.5],
+                        'model__max_depth': [5, 7]
+                    }
+                }
+            }
+        
+        # NORMAL MODE: Full hyperparameter grids
         return {
             'LogisticRegression': {
                 'estimator': LogisticRegression(max_iter=1000, random_state=self.random_state),
@@ -136,7 +244,23 @@ class SklearnHPOTrainer:
                 'params': {'model__alpha': [0.1, 0.5, 1.0, 2.0]}
             },
             'XGBoost': {
-                'estimator': XGBClassifier(random_state=self.random_state, eval_metric='logloss'),
+                'estimator': XGBClassifier(
+                    random_state=self.random_state, 
+                    eval_metric='logloss',
+                    **self.gpu_config.get_xgboost_params()
+                ),
+                'params': {
+                    'model__n_estimators': [50, 100, 200],
+                    'model__learning_rate': [0.01, 0.1, 0.5],
+                    'model__max_depth': [3, 5, 7]
+                }
+            },
+            'LightGBM': {
+                'estimator': lgbm.LGBMClassifier(
+                    random_state=self.random_state,
+                    verbose=-1,
+                    **self.gpu_config.get_lightgbm_params()
+                ),
                 'params': {
                     'model__n_estimators': [50, 100, 200],
                     'model__learning_rate': [0.01, 0.1, 0.5],
@@ -146,11 +270,19 @@ class SklearnHPOTrainer:
         }
     
     def _get_preprocessors(self) -> Dict:
-        """Get preprocessing options."""
-        return {
+        """Get preprocessing options.
+        
+        For mini datasets, skip TruncatedSVD (requires many samples) and reduce PCA components.
+        
+        Incompatibilities:
+        - LightGBM: Requires dense matrices, skips CountVectorizer (sparse output)
+        - MultinomialNB: Requires non-negative features, skips TruncatedSVD
+        """
+        preprocessors = {
             'CountVectorizer': {
                 'step': CountVectorizer(max_features=5000, stop_words='english'),
-                'requires_text': True
+                'requires_text': True,
+                'incompatible_models': ['LightGBM']  # LightGBM doesn't support sparse matrices well
             },
             'TfidfVectorizer': {
                 'step': TfidfVectorizer(max_features=5000, stop_words='english'),
@@ -172,11 +304,24 @@ class SklearnHPOTrainer:
                 'step': RobustScaler(),
                 'requires_text': False
             },
-            'PCA': {
+        }
+        
+        # For mini datasets, skip TruncatedSVD (n_components=100 fails with ~100 samples)
+        # and reduce PCA components
+        if self.mini_dataset:
+            # PCA with reduced components for small datasets
+            preprocessors['PCA'] = {
+                'step': PCA(n_components=10, random_state=self.random_state),
+                'requires_text': False
+            }
+            # Skip TruncatedSVD entirely for mini datasets - it requires n_samples >= n_components
+        else:
+            # Full dataset: use standard PCA and TruncatedSVD
+            preprocessors['PCA'] = {
                 'step': PCA(n_components=100, random_state=self.random_state),
                 'requires_text': False
-            },
-            'TruncatedSVD': {
+            }
+            preprocessors['TruncatedSVD'] = {
                 'step': Pipeline([
                     ('tfidf', TfidfVectorizer(max_features=5000, stop_words='english')),
                     ('svd', TruncatedSVD(n_components=100, random_state=self.random_state)),
@@ -184,7 +329,8 @@ class SklearnHPOTrainer:
                 'requires_text': True,
                 'incompatible_models': ['MultinomialNB']
             }
-        }
+        
+        return preprocessors
     
     def train(self, X, y, models: Optional[List[str]] = None, 
               preprocessors: Optional[List[str]] = None, cv_folds: int = 5) -> Dict:
@@ -252,11 +398,13 @@ class SklearnHPOTrainer:
                         cv=cv,
                         scoring='roc_auc',
                         n_jobs=self.n_jobs,
-                        verbose=0
+                        verbose=0,
+                        pre_dispatch='2*n_jobs'
                     )
                     
-                    # Fit
-                    grid_search.fit(X, y)
+                    # Fit with loky backend for true process-based parallelism (better for Ryzen 9)
+                    with joblib.parallel_backend('loky', n_jobs=self.n_jobs):
+                        grid_search.fit(X, y)
                     
                     # Extract results
                     best_idx = grid_search.best_index_
