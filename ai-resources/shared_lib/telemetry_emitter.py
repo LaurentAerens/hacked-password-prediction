@@ -74,6 +74,8 @@ class TelemetryEmitter:
         self.run_id = run_id or str(uuid.uuid4())
         self._seq = 0
         self._subscribers: List[Callable[[ProgressEvent], None]] = []
+        self._events: List[ProgressEvent] = []  # Bounded buffer for event retrieval
+        self._max_events = 500  # Keep last 500 events for polling
         self._lock = None  # Can be upgraded to threading.Lock if needed for concurrency
     
     def subscribe(self, callback: Callable[[ProgressEvent], None]) -> None:
@@ -184,7 +186,26 @@ class TelemetryEmitter:
                     exc_info=False
                 )
         
+        # Store in bounded buffer
+        self._events.append(event)
+        if len(self._events) > self._max_events:
+            self._events.pop(0)
+        
         return event
+    
+    def get_events(self, limit: Optional[int] = None) -> List[ProgressEvent]:
+        """
+        Get recent events from the buffer.
+        
+        Args:
+            limit: Maximum number of events to return (None = all).
+        
+        Returns:
+            List of recent events, oldest first.
+        """
+        if limit is None:
+            return list(self._events)
+        return list(self._events[-limit:]) if self._events else []
 
 
 # Module-level state for convenience functions

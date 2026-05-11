@@ -15,12 +15,15 @@ import ctypes
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Callable
+from datetime import datetime
 
 import joblib
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import matplotlib.pyplot as plt
 import streamlit as st
+import torch
 
 # Allow imports from ai-resources when launched from repository root.
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,10 +31,15 @@ sys.path.insert(0, str(BASE_DIR))
 
 from adaptive_trainer import train_with_adaptive_search
 from data_generation import generate_data
+from nn_trainer import PasswordNNTrainer
+from shared_lib.telemetry_emitter import TelemetryEmitter
 from shared_lib.data_utils import get_data
 from shared_lib.realtime_dashboard import RealtimeDashboardState
 from shared_lib.control_signal import ControlSignal
 from shared_lib.checkpoint_manager import CheckpointManager
+from ensemble import EnsemblePredictor
+from model_registry import UnifiedModelRegistry
+from model_comparison import ModelComparison
 
 
 DATA_DIR = BASE_DIR / "data"
@@ -408,6 +416,38 @@ def _hard_stop_thread(worker: Optional[threading.Thread]) -> bool:
     return False
 
 
+def _nn_training_worker(
+    passwords: pd.Series,
+    labels: pd.Series,
+    config: dict,
+    control_signal: ControlSignal,
+    telemetry_emitter: TelemetryEmitter,
+    job_state: dict,
+) -> None:
+    """Background worker for NN training. Runs in thread, updates job_state."""
+    try:
+        trainer = PasswordNNTrainer()
+        
+        result = trainer.train(
+            X=passwords,
+            y=labels,
+            epochs=config["epochs"],
+            batch_size=config["batch_size"],
+            learning_rate=config["learning_rate"],
+            control_signal=control_signal,
+            telemetry_emitter=telemetry_emitter,
+        )
+        
+        job_state["result"] = result
+        job_state["status"] = "completed"
+    except Exception as exc:
+        job_state["error"] = str(exc)
+        job_state["status"] = "failed"
+    finally:
+        job_state["done"] = True
+
+
+
 def _predict_with_model(model, password: str) -> tuple[int, float | None]:
     pred = int(model.predict([password])[0])
 
@@ -424,7 +464,269 @@ def _predict_with_model(model, password: str) -> tuple[int, float | None]:
     return pred, None
 
 
-def _show_overview() -> None:
+def _show_nn_training_tab() -> None:
+    """Show NN training tab with live progress and controls."""
+    st.subheader("Phase 3: Neural Network Classifier")
+    st.write("Train independent neural network in parallel with sklearn phases.")
+
+    if not COMBINED_CSV.exists():
+        st.warning("Combined dataset not found. Run Data Generation first.")
+        return
+    
+    # Load data
+    df = pd.read_csv(COMBINED_CSV)
+    
+    # Initialize session state keys for NN training
+    for key in [
+        "nn_training_state", "nn_config", "nn_control_signal", "nn_telemetry_emitter",
+        "nn_history", "nn_training_active", "nn_training_job", "nn_training_thread"
+    ]:
+        if key not in st.session_state:
+            if key == "nn_training_state":
+                st.session_state[key] = {}
+            elif key == "nn_config":
+                st.session_state[key] = {}
+            elif key == "nn_control_signal":
+                st.session_state[key] = None
+            elif key == "nn_telemetry_emitter":
+                st.session_state[key] = None
+            elif key == "nn_history":
+                st.session_state[key] = {}
+            elif key in ["nn_training_active", "nn_training_job", "nn_training_thread"]:
+                st.session_state[key] = None if key != "nn_training_active" else False
+    
+    # Configuration Section
+    with st.expander("🔧 NN Configuration", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            nn_config = {
+                "num_layers": st.slider("Layers", 2, 4, 2, help="Dense layers count", key="nn_layers"),
+                "hidden_dim": st.slider("Hidden Dim", 32, 256, 64, step=32, key="nn_hidden_dim"),
+                "dropout": st.slider("Dropout", 0.0, 0.5, 0.2, step=0.1, key="nn_dropout"),
+                "learning_rate": st.select_slider(
+                    "Learning Rate",
+                    [1e-4, 5e-4, 1e-3, 5e-3, 1e-2],
+                    value=1e-3,
+                    format_func=lambda x: f"{x:.0e}",
+                    key="nn_lr"
+                ),
+            }
+        
+        with col2:
+            nn_config.update({
+                "epochs": st.slider("Epochs", 5, 100, 20, step=5, key="nn_epochs"),
+                "batch_size": st.selectbox(
+                    "Batch Size",
+                    [16, 32, 64, 128],
+                    index=1,
+                    help="Auto-adjust for GPU/CPU",
+                    key="nn_batch_size"
+                ),
+                "tokenization": st.selectbox(
+                    "Tokenization",
+                    ["Character-level Embedding"],
+                    help="Character-level (MVP), subword/patterns in Wave 3b+",
+                    key="nn_tokenization"
+                ),
+            })
+        
+        st.session_state.nn_config = nn_config
+    
+    # Training Controls Section
+    st.markdown("### Training Controls")
+    col_train, col_pause, col_resume, col_stop = st.columns(4)
+    
+    with col_train:
+        train_nn_button = st.button("▶ Train NN", key="btn_train_nn", use_container_width=True)
+    with col_pause:
+        pause_nn_button = st.button("⏸ Pause", key="btn_pause_nn", disabled=not st.session_state.nn_training_active, use_container_width=True)
+    with col_resume:
+        resume_nn_button = st.button("▶ Resume", key="btn_resume_nn", disabled=not st.session_state.nn_training_active, use_container_width=True)
+    with col_stop:
+        stop_nn_button = st.button("⏹ Stop", key="btn_stop_nn", disabled=not st.session_state.nn_training_active, use_container_width=True)
+    
+    # Train button logic
+    if train_nn_button:
+        if not st.session_state.nn_training_active:
+            from shared_lib.control_signal import ControlSignal
+            
+            control_signal = ControlSignal()
+            emitter = TelemetryEmitter()
+            
+            st.session_state.nn_control_signal = control_signal
+            st.session_state.nn_telemetry_emitter = emitter
+            st.session_state.nn_training_active = True
+            st.session_state.nn_training_state = {"status": "starting"}
+            
+            job_state = {"done": False, "result": None, "error": None, "status": "running"}
+            st.session_state.nn_training_job = job_state
+            
+            worker = threading.Thread(
+                target=_nn_training_worker,
+                args=(
+                    df["password"],
+                    df["target"],
+                    nn_config,
+                    control_signal,
+                    emitter,
+                    job_state,
+                ),
+                daemon=True,
+            )
+            worker.start()
+            st.session_state.nn_training_thread = worker
+            st.rerun()
+    
+    # Handle pause/resume/stop buttons
+    if st.session_state.nn_training_active:
+        control_signal = st.session_state.nn_control_signal
+        
+        if pause_nn_button and control_signal:
+            control_signal.request_pause()
+            st.info("Pause requested...")
+            st.rerun()
+        
+        if resume_nn_button and control_signal:
+            control_signal.resume()
+            st.info("Resuming...")
+            st.rerun()
+        
+        if stop_nn_button and control_signal:
+            control_signal.request_stop()
+            st.session_state.nn_training_active = False
+            st.warning("Stop requested...")
+            st.rerun()
+    
+    # Live Training Progress Section
+    st.markdown("### Training Progress")
+    
+    # Update progress display if training is active
+    if st.session_state.nn_training_active:
+        emitter = st.session_state.nn_telemetry_emitter
+        control_signal = st.session_state.nn_control_signal
+        
+        if emitter:
+            events = emitter.get_events(limit=100)
+            
+            # Extract latest epoch event
+            latest_epoch_event = None
+            for event in reversed(events):
+                if event.get("event_type") == "nn.epoch.completed":
+                    latest_epoch_event = event
+                    break
+            
+            # Status and device
+            col_status, col_device = st.columns([0.7, 0.3])
+            with col_status:
+                state = control_signal.get_state() if control_signal else "STOPPED"
+                status_emoji = {"RUNNING": "🟢", "PAUSED": "🟡", "STOPPED": "🔴"}.get(state, "⚪")
+                st.metric("Status", f"{status_emoji} {state}")
+            with col_device:
+                device = "GPU" if torch.cuda.is_available() else "CPU"
+                st.metric("Device", device)
+            
+            # Epoch progress bar
+            if latest_epoch_event:
+                epoch = latest_epoch_event.get("metrics", {}).get("epoch", 0)
+                total_epochs = nn_config.get("epochs", 1)
+                progress = epoch / total_epochs if total_epochs else 0
+                st.progress(progress, text=f"Epoch {epoch + 1}/{total_epochs}")
+                
+                # Metrics display
+                col_m1, col_m2, col_m3 = st.columns(3)
+                metrics = latest_epoch_event.get("metrics", {})
+                with col_m1:
+                    st.metric("Train Loss", f"{metrics.get('train_loss', 0):.4f}")
+                with col_m2:
+                    st.metric("Val Loss", f"{metrics.get('val_loss', 0):.4f}")
+                with col_m3:
+                    st.metric("Val Accuracy", f"{metrics.get('val_acc', 0):.2%}")
+            
+            # Event log
+            st.markdown("### Event Log")
+            event_log_text = "\n".join([
+                f"[{e.get('emitted_at', '')}] {e.get('event_type', 'unknown')}"
+                for e in events[-10:]
+            ])
+            if event_log_text:
+                st.code(event_log_text, language="text")
+        
+        # Keep UI live
+        time.sleep(1)
+        st.rerun()
+    
+    # Check if training completed
+    if st.session_state.get("nn_training_job"):
+        job_state = st.session_state.nn_training_job
+        if job_state.get("done"):
+            st.session_state.nn_training_active = False
+            
+            if job_state.get("error"):
+                st.error(f"❌ Training failed: {job_state['error']}")
+            else:
+                result = job_state.get("result")
+                if result:
+                    st.session_state.nn_training_state = {"status": "completed", "result": result}
+                    st.rerun()
+    
+    # Display results after training complete
+    if st.session_state.nn_training_state.get("status") == "completed":
+        result = st.session_state.nn_training_state.get("result", {})
+        
+        st.markdown("---")
+        st.markdown("### ✅ Training Complete!")
+        st.success("✅ Training finished successfully.")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Val Loss", f"{result.get('best_metrics', {}).get('val_loss', 0):.4f}")
+        with col2:
+            st.metric("Val Accuracy", f"{result.get('best_metrics', {}).get('val_acc', 0):.2%}")
+        with col3:
+            st.metric("Best Epoch", result.get("best_epoch", 0))
+        with col4:
+            st.metric("Training Time", f"{result.get('training_time_sec', 0):.1f}s")
+        
+        # Model info
+        with st.expander("📊 Model Info"):
+            model_info = {
+                "Checkpoint": result.get("checkpoint_path", ""),
+                "Device": result.get("device", ""),
+            }
+            st.json(model_info)
+        
+        # Download model
+        if result.get("checkpoint_path") and Path(result["checkpoint_path"]).exists():
+            with open(result["checkpoint_path"], "rb") as f:
+                st.download_button(
+                    label="Download Model",
+                    data=f.read(),
+                    file_name="nn_model.pt",
+                    mime="application/octet-stream"
+                )
+        
+        # Loss/accuracy curves
+        history = result.get("history", {})
+        if history and "epoch" in history:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            
+            ax1.plot(history["epoch"], history.get("train_loss", []), label="Train Loss")
+            ax1.plot(history["epoch"], history.get("val_loss", []), label="Val Loss")
+            ax1.set_xlabel("Epoch")
+            ax1.set_ylabel("Loss")
+            ax1.legend()
+            ax1.grid(True)
+            
+            ax2.plot(history["epoch"], history.get("val_acc", []))
+            ax2.set_xlabel("Epoch")
+            ax2.set_ylabel("Accuracy")
+            ax2.grid(True)
+            
+            st.pyplot(fig)
+
+
+
     st.markdown('<div class="harp-hero"><h2 class="harp-hero-title">🪉 H.A.R.P. v2 Control Center</h2><p class="harp-hero-subtitle">Open-source password risk modeling with adaptive search and local execution.</p></div>', unsafe_allow_html=True)
 
     overview = _dataset_overview(str(COMBINED_CSV))
@@ -1112,6 +1414,127 @@ def _show_predict_tab() -> None:
             st.write("Confidence: unavailable for this model type.")
 
 
+def _show_overview() -> None:
+    """Show overview page."""
+    st.markdown(
+        '<div class="harp-hero"><h1 class="harp-hero-title">🪉 H.A.R.P. v2</h1>'
+        '<p class="harp-hero-subtitle">Hacked Password Risk Prediction</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "This system trains ensemble models to predict whether a password has been compromised in known breaches. "
+        "It combines Phase 1 (Adaptive GridSearchCV), Phase 2 (Optuna fine-tuning), and Neural Network approaches."
+    )
+    st.markdown("Use the navigation menu to explore features.")
+
+
+def _show_comparison_tab() -> None:
+    """Show model comparison and ensemble prediction tab."""
+    st.subheader("Model Comparison & Ensemble")
+    st.write("Compare Phase 1, Phase 2, and NN model performance side-by-side, and make ensemble predictions.")
+    
+    # Load registry
+    registry = UnifiedModelRegistry(base_dir=str(MODELS_DIR))
+    comparison = ModelComparison(registry)
+    
+    # Build comparison table
+    comp_df = comparison.build_comparison_table()
+    
+    if comp_df.empty:
+        st.warning("No trained models available for comparison. Train Phase 1, Phase 2, or NN first.")
+    else:
+        # Metrics table
+        st.markdown("### Performance Metrics")
+        st.dataframe(comp_df, use_container_width=True)
+        
+        # Best model highlight
+        st.markdown("### Best Model")
+        best_by_acc = comparison.get_best_model_by_metric("Accuracy")
+        if best_by_acc:
+            st.success(f"Best by Accuracy: **{best_by_acc}**")
+        
+        # Comparison chart
+        st.markdown("### Metrics Comparison")
+        fig = comparison.plot_comparison()
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Ensemble configuration
+        st.markdown("### Ensemble Configuration")
+        
+        col_select, col_predict = st.columns([0.8, 0.2])
+        
+        with col_select:
+            st.markdown("Select models to include in ensemble:")
+            use_phase1 = st.checkbox("Phase 1 (Adaptive GridSearchCV)", value=True, key="cb_phase1")
+            use_phase2 = st.checkbox("Phase 2 (Optuna Fine-Tuning)", value=True, key="cb_phase2")
+            use_nn = st.checkbox("Neural Network", value=True, key="cb_nn")
+        
+        with col_predict:
+            st.write("")  # Spacer
+            st.write("")  # Spacer
+            predict_button = st.button("Make Predictions", key="btn_ensemble_predict", type="primary")
+        
+        # Ensemble predictions
+        if predict_button:
+            ensemble = EnsemblePredictor()
+            
+            if use_phase1:
+                try:
+                    phase1_model_path = comp_df[comp_df["Phase"] == "PHASE1"]["Path"].iloc[0]
+                    ensemble.load_phase1_model(phase1_model_path)
+                except (IndexError, FileNotFoundError):
+                    pass
+            
+            if use_phase2:
+                try:
+                    phase2_model_path = comp_df[comp_df["Phase"] == "PHASE2"]["Path"].iloc[0]
+                    ensemble.load_phase2_model(phase2_model_path)
+                except (IndexError, FileNotFoundError):
+                    pass
+            
+            if use_nn:
+                try:
+                    nn_model_path = comp_df[comp_df["Phase"] == "NN"]["Path"].iloc[0]
+                    ensemble.load_nn_model(nn_model_path)
+                except (IndexError, FileNotFoundError):
+                    pass
+            
+            st.markdown("### Ensemble Results")
+            
+            # Show ensemble config
+            config = ensemble.ensemble_config
+            st.metric("Active Models", f"{config['active_count']}/3")
+            
+            # Load test set
+            if COMBINED_CSV.exists():
+                df = pd.read_csv(COMBINED_CSV)
+                if "test_passwords" not in st.session_state or len(st.session_state["test_passwords"]) == 0:
+                    test_idx = np.random.choice(len(df), size=min(100, len(df)), replace=False)
+                    st.session_state["test_passwords"] = df.iloc[test_idx]["password"].values
+                
+                # Predictions on test set
+                if ensemble.get_active_model_count() > 0 and len(st.session_state["test_passwords"]) > 0:
+                    try:
+                        proba = ensemble.predict_proba(pd.Series(st.session_state["test_passwords"]))
+                        preds = ensemble.predict(pd.Series(st.session_state["test_passwords"]))
+                        
+                        # Show sample predictions
+                        result_df = pd.DataFrame({
+                            "Password": st.session_state["test_passwords"][:10],
+                            "Prob Not Hacked": proba[:10, 0],
+                            "Prob Hacked": proba[:10, 1],
+                            "Prediction": ["Hacked" if p else "Safe" for p in preds[:10]]
+                        })
+                        
+                        st.dataframe(result_df, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error making predictions: {e}")
+                else:
+                    st.warning("No active models or test data available")
+            else:
+                st.warning("Combined dataset not found. Run Data Generation first.")
+
+
 def main() -> None:
     st.set_page_config(
         page_title="H.A.R.P. v2 UI",
@@ -1124,7 +1547,7 @@ def main() -> None:
     st.sidebar.title("🪉 H.A.R.P. v2")
     page = st.sidebar.radio(
         "Navigate",
-        ["Overview", "Data Explorer", "Data Generation", "Adaptive Training", "Predict"],
+        ["Overview", "Data Explorer", "Data Generation", "Adaptive Training", "Neural Network Training", "Comparison", "Predict"],
     )
 
     st.sidebar.markdown("---")
@@ -1139,6 +1562,10 @@ def main() -> None:
         _show_data_generation_tab()
     elif page == "Adaptive Training":
         _show_training_tab()
+    elif page == "Neural Network Training":
+        _show_nn_training_tab()
+    elif page == "Comparison":
+        _show_comparison_tab()
     elif page == "Predict":
         _show_predict_tab()
 
