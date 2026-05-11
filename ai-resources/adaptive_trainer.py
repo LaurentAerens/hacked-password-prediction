@@ -11,10 +11,12 @@ import uuid
 import time
 import os
 import json
+import ctypes
 import numpy as np
 import optuna
 from datetime import datetime
 from typing import Dict, Optional, List, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.model_selection import ParameterGrid
@@ -25,6 +27,82 @@ from modern_trainers.optimizers.sklearn_hpo import SklearnHPOTrainer
 from shared_lib.telemetry_emitter import TelemetryEmitter
 from shared_lib.control_signal import ControlSignal
 from shared_lib.checkpoint_manager import CheckpointManager
+
+
+def _detect_total_ram_gb() -> Optional[float]:
+    """Return total system RAM in GiB, or None if detection fails."""
+    try:
+        if os.name == "nt":
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)) == 0:
+                return None
+            return float(status.ullTotalPhys) / (1024 ** 3)
+
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+        return float(page_size * phys_pages) / (1024 ** 3)
+    except Exception:
+        return None
+
+
+def _resolve_parallel_plan(
+    total_candidates: int,
+    n_jobs: int,
+    cv_folds: int,
+    mean_trials: int,
+    max_parallel_candidates: Optional[int],
+    ram_per_candidate_gb: float,
+    cpu_utilization_target: float,
+    allow_candidate_parallelism: bool,
+) -> Dict[str, int]:
+    """Compute a resource-aware parallel plan for adaptive search.
+
+    Returns:
+        dict with keys `cpu_budget`, `outer_workers`, `inner_n_jobs`.
+    """
+    cpu_total = max(1, os.cpu_count() or 1)
+    requested_budget = cpu_total if n_jobs in (-1, None) else max(1, min(cpu_total, int(n_jobs)))
+    cpu_target = max(0.2, min(1.0, cpu_utilization_target))
+    cpu_budget = max(1, min(cpu_total, int(requested_budget * cpu_target)))
+
+    if total_candidates <= 1 or not allow_candidate_parallelism:
+        return {"cpu_budget": cpu_budget, "outer_workers": 1, "inner_n_jobs": cpu_budget}
+
+    total_ram_gb = _detect_total_ram_gb()
+    if total_ram_gb is None or ram_per_candidate_gb <= 0:
+        mem_limited_workers = total_candidates
+    else:
+        mem_limited_workers = max(1, int(total_ram_gb / ram_per_candidate_gb))
+
+    cpu_limited_workers = cpu_budget
+    if mean_trials <= 8 and cv_folds <= 2:
+        cpu_limited_workers = max(1, min(cpu_budget, cpu_budget // 2 or 1))
+
+    outer_cap = min(total_candidates, mem_limited_workers, cpu_limited_workers)
+    if max_parallel_candidates is not None:
+        outer_cap = min(outer_cap, max(1, int(max_parallel_candidates)))
+
+    outer_workers = max(1, outer_cap)
+    inner_n_jobs = max(1, cpu_budget // outer_workers)
+    return {
+        "cpu_budget": cpu_budget,
+        "outer_workers": outer_workers,
+        "inner_n_jobs": inner_n_jobs,
+    }
 
 
 def _suggest_finetune_param(trial: optuna.Trial, name: str, best_value, grid_values):
@@ -285,7 +363,10 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                                checkpoint_manager: Optional[CheckpointManager] = None,
                                run_phase2: bool = False,
                                phase2_top_n: int = 3,
-                               phase2_trials_per_model: int = 20) -> Dict:
+                               phase2_trials_per_model: int = 20,
+                               max_parallel_candidates: Optional[int] = None,
+                               ram_per_candidate_gb: float = 2.0,
+                               cpu_utilization_target: float = 0.9) -> Dict:
     """
     Adaptive hyperparameter optimization (like Azure AutoML).
     
@@ -310,6 +391,9 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
         run_phase2: Whether to run Optuna Phase 2 fine-tuning on top candidates.
         phase2_top_n: Number of top Phase 1 candidates to fine-tune in Phase 2.
         phase2_trials_per_model: Number of Optuna trials per candidate in Phase 2.
+        max_parallel_candidates: Optional cap for concurrent model+preprocessor jobs.
+        ram_per_candidate_gb: Estimated RAM budget per concurrent candidate.
+        cpu_utilization_target: Fraction of requested CPUs to actively use (0.2-1.0).
         
     Returns:
         Dictionary with best_model, results_df, experiment_name, metrics
@@ -386,63 +470,105 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
     
     screening_results = []
     combination_count = 0
-    
-    # Phase 1a: Fast screening on ALL combinations
+
+    phase1_candidates = []
+    total_trials = 0
     for prep_name in preprocessors:
+        incompatible_models = all_preprocessors[prep_name].get('incompatible_models', [])
+        for model_name in models:
+            if model_name in incompatible_models:
+                continue  # Skip incompatible model+preprocessor combinations
+            trials = len(list(ParameterGrid(all_models[model_name]['params'])))
+            total_trials += trials
+            phase1_candidates.append((prep_name, model_name, trials))
+
+    mean_trials = max(1, total_trials // max(1, len(phase1_candidates)))
+    parallel_plan = _resolve_parallel_plan(
+        total_candidates=len(phase1_candidates),
+        n_jobs=n_jobs,
+        cv_folds=2,
+        mean_trials=mean_trials,
+        max_parallel_candidates=max_parallel_candidates,
+        ram_per_candidate_gb=ram_per_candidate_gb,
+        cpu_utilization_target=cpu_utilization_target,
+        allow_candidate_parallelism=(control_signal is None),
+    )
+
+    emitter.emit_event(
+        "training.parallel.plan",
+        "phase_1a_screening",
+        "scheduler",
+        "planned",
+        metrics={
+            "cpu_budget": parallel_plan["cpu_budget"],
+            "outer_workers": parallel_plan["outer_workers"],
+            "inner_n_jobs": parallel_plan["inner_n_jobs"],
+            "mean_trials": mean_trials,
+            "ram_per_candidate_gb": ram_per_candidate_gb,
+            "cpu_utilization_target": cpu_utilization_target,
+        },
+    )
+
+    print(
+        f"Parallel plan: workers={parallel_plan['outer_workers']} | "
+        f"grid_n_jobs={parallel_plan['inner_n_jobs']} | cpu_budget={parallel_plan['cpu_budget']}"
+    )
+    
+    def _run_phase1_candidate(prep_name: str, model_name: str) -> Dict:
         preprocessor = all_preprocessors[prep_name]
         prep_step = preprocessor['step']
-        
-        for model_name in models:
-            model_config = all_models[model_name]
-            model_estimator = model_config['estimator']
-            param_grid = model_config['params']
-            
-            combination_count += 1
-            n_trials = len(list(ParameterGrid(param_grid)))
+        model_config = all_models[model_name]
+        model_estimator = model_config['estimator']
+        param_grid = model_config['params']
 
-            # Emit "currently tuning" event before fit starts.
-            emitter.emit_event(
-                "training.candidate.started",
-                "phase_1a_screening",
-                "combination",
-                "running",
-                model=model_name,
-                preprocessor=prep_name,
-                current=combination_count,
-                total=total_combinations,
-                message=f"Fine-tuning {model_name} + {prep_name}",
-                metrics={"cv_folds": 2, "trials": n_trials}
-            )
-            
+        pipeline = Pipeline([
+            ('preprocessing', clone(prep_step)),
+            ('model', clone(model_estimator))
+        ])
+
+        cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=random_state)
+        grid_search = GridSearchCV(
+            pipeline,
+            param_grid,
+            cv=cv,
+            scoring='roc_auc',
+            n_jobs=parallel_plan['inner_n_jobs'],
+            verbose=0,
+            pre_dispatch='2*n_jobs'
+        )
+
+        grid_search.fit(X, y)
+        return {
+            'model': model_name,
+            'preprocessor': prep_name,
+            'screening_auc': grid_search.best_score_,
+            'best_params': grid_search.best_params_
+        }
+
+    for prep_name, model_name, n_trials in phase1_candidates:
+        combination_count += 1
+        emitter.emit_event(
+            "training.candidate.started",
+            "phase_1a_screening",
+            "combination",
+            "running",
+            model=model_name,
+            preprocessor=prep_name,
+            current=combination_count,
+            total=total_combinations,
+            message=f"Fine-tuning {model_name} + {prep_name}",
+            metrics={"cv_folds": 2, "trials": n_trials}
+        )
+
+    completed_count = 0
+    if parallel_plan['outer_workers'] == 1:
+        for prep_name, model_name, _ in phase1_candidates:
             try:
-                pipeline = Pipeline([
-                    ('preprocessing', prep_step),
-                    ('model', model_estimator)
-                ])
-                
-                cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=random_state)
-                grid_search = GridSearchCV(
-                    pipeline,
-                    param_grid,
-                    cv=cv,
-                    scoring='roc_auc',
-                    n_jobs=n_jobs,
-                    verbose=0
-                )
-                
-                grid_search.fit(X, y)
-                
-                screening_results.append({
-                    'model': model_name,
-                    'preprocessor': prep_name,
-                    'screening_auc': grid_search.best_score_,
-                    'best_params': grid_search.best_params_
-                })
-                
-                auc_score = grid_search.best_score_
-                print(f"  {model_name:20} + {prep_name:15} → AUC: {auc_score:.4f}")
-                
-                # Emit per-combination progress
+                candidate_result = _run_phase1_candidate(prep_name, model_name)
+                screening_results.append(candidate_result)
+                completed_count += 1
+                auc_score = candidate_result['screening_auc']
+                print(f"  {model_name:20} + {prep_name:15} -> AUC: {auc_score:.4f}")
                 emitter.emit_event(
                     "training.candidate.completed",
                     "phase_1a_screening",
@@ -450,75 +576,13 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                     "completed",
                     model=model_name,
                     preprocessor=prep_name,
-                    current=combination_count,
+                    current=completed_count,
                     total=total_combinations,
                     metrics={"auc": round(auc_score, 4)}
                 )
-                
-                # Save checkpoint after combination completes
-                if checkpoint_manager is not None:
-                    checkpoint_manager.save_checkpoint(
-                        run_id=run_id,
-                        phase="phase_1a",
-                        combination_index=combination_count,
-                        total_combinations=total_combinations,
-                        results_df=pd.DataFrame(screening_results),
-                        best_model=None,  # Phase 1a doesn't have a best model yet
-                        best_auc=-1,
-                        best_config={}
-                    )
-                
-                # Check control signal
-                if control_signal is not None:
-                    # Check for pause
-                    if control_signal.should_pause():
-                        emitter.emit_event(
-                            "training.paused",
-                            "phase_1a_screening",
-                            "combination",
-                            "paused"
-                        )
-                        # Wait until resume is called
-                        while control_signal.get_state() == "PAUSED":
-                            time.sleep(0.1)
-                        # Resumed
-                        emitter.emit_event(
-                            "training.resumed",
-                            "phase_1a_screening",
-                            "combination",
-                            "resumed"
-                        )
-                    
-                    # Check for stop
-                    if control_signal.should_stop():
-                        emitter.emit_event(
-                            "training.stopped",
-                            "phase_1a_screening",
-                            "combination",
-                            "stopped"
-                        )
-                        # Return partial results
-                        cv_results = pd.DataFrame(screening_results)
-                        return {
-                            'best_model': None,
-                            'best_config': None,
-                            'results_df': cv_results,
-                            'experiment_name': experiment_name,
-                            'metrics': {
-                                'best_auc': -1,
-                                'combinations_screened': len(screening_results),
-                                'combinations_fully_evaluated': 0,
-                                'cv_folds': cv_folds,
-                                'screening_folds': 2,
-                                'top_percent': top_percent
-                            }
-                        }
-                
             except Exception as e:
                 error_msg = str(e)[:50]
-                print(f"  {model_name:20} + {prep_name:15} → FAILED: {error_msg}")
-                
-                # Emit failure event
+                print(f"  {model_name:20} + {prep_name:15} -> FAILED: {error_msg}")
                 emitter.emit_event(
                     "training.candidate.failed",
                     "phase_1a_screening",
@@ -526,12 +590,102 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                     "failed",
                     model=model_name,
                     preprocessor=prep_name,
-                    current=combination_count,
+                    current=completed_count,
                     total=total_combinations,
                     error_type=type(e).__name__,
                     error_message=error_msg
                 )
-                continue
+
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_checkpoint(
+                    run_id=run_id,
+                    phase="phase_1a",
+                    combination_index=completed_count,
+                    total_combinations=total_combinations,
+                    results_df=pd.DataFrame(screening_results),
+                    best_model=None,
+                    best_auc=-1,
+                    best_config={}
+                )
+
+            if control_signal is not None:
+                if control_signal.should_pause():
+                    emitter.emit_event("training.paused", "phase_1a_screening", "combination", "paused")
+                    while control_signal.get_state() == "PAUSED":
+                        time.sleep(0.1)
+                    emitter.emit_event("training.resumed", "phase_1a_screening", "combination", "resumed")
+
+                if control_signal.should_stop():
+                    emitter.emit_event("training.stopped", "phase_1a_screening", "combination", "stopped")
+                    cv_results = pd.DataFrame(screening_results)
+                    return {
+                        'best_model': None,
+                        'best_config': None,
+                        'results_df': cv_results,
+                        'experiment_name': experiment_name,
+                        'metrics': {
+                            'best_auc': -1,
+                            'combinations_screened': len(screening_results),
+                            'combinations_fully_evaluated': 0,
+                            'cv_folds': cv_folds,
+                            'screening_folds': 2,
+                            'top_percent': top_percent
+                        }
+                    }
+    else:
+        with ThreadPoolExecutor(max_workers=parallel_plan['outer_workers']) as executor:
+            futures = {
+                executor.submit(_run_phase1_candidate, prep_name, model_name): (prep_name, model_name)
+                for prep_name, model_name, _ in phase1_candidates
+            }
+
+            for future in as_completed(futures):
+                prep_name, model_name = futures[future]
+                try:
+                    candidate_result = future.result()
+                    screening_results.append(candidate_result)
+                    completed_count += 1
+                    auc_score = candidate_result['screening_auc']
+                    print(f"  {model_name:20} + {prep_name:15} -> AUC: {auc_score:.4f}")
+                    emitter.emit_event(
+                        "training.candidate.completed",
+                        "phase_1a_screening",
+                        "combination",
+                        "completed",
+                        model=model_name,
+                        preprocessor=prep_name,
+                        current=completed_count,
+                        total=total_combinations,
+                        metrics={"auc": round(auc_score, 4)}
+                    )
+                except Exception as e:
+                    completed_count += 1
+                    error_msg = str(e)[:50]
+                    print(f"  {model_name:20} + {prep_name:15} -> FAILED: {error_msg}")
+                    emitter.emit_event(
+                        "training.candidate.failed",
+                        "phase_1a_screening",
+                        "combination",
+                        "failed",
+                        model=model_name,
+                        preprocessor=prep_name,
+                        current=completed_count,
+                        total=total_combinations,
+                        error_type=type(e).__name__,
+                        error_message=error_msg
+                    )
+
+                if checkpoint_manager is not None:
+                    checkpoint_manager.save_checkpoint(
+                        run_id=run_id,
+                        phase="phase_1a",
+                        combination_index=completed_count,
+                        total_combinations=total_combinations,
+                        results_df=pd.DataFrame(screening_results),
+                        best_model=None,
+                        best_auc=-1,
+                        best_config={}
+                    )
     
     # Rank by screening AUC and select top candidates
     screening_df = pd.DataFrame(screening_results).sort_values('screening_auc', ascending=False)
@@ -640,7 +794,7 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
                     'auc': auc_score
                 }
             
-            print(f"  {model_name:20} + {prep_name:15} → AUC: {auc_score:.4f}")
+            print(f"  {model_name:20} + {prep_name:15} -> AUC: {auc_score:.4f}")
             
             # Emit per-candidate progress with best_auc update
             emitter.emit_event(
@@ -716,7 +870,7 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
             
         except Exception as e:
             error_msg = str(e)[:50]
-            print(f"  {model_name:20} + {prep_name:15} → FAILED: {error_msg}")
+            print(f"  {model_name:20} + {prep_name:15} -> FAILED: {error_msg}")
             
             # Emit failure event
             emitter.emit_event(
@@ -784,7 +938,7 @@ def train_with_adaptive_search(X, y, models: Optional[List[str]] = None,
             top_phase2 = phase2_results_df.iloc[0]
             print(
                 f"Phase 2 Best: {top_phase2['model']} + {top_phase2['preprocessor']} "
-                f"→ AUC: {top_phase2['phase2_best_auc']:.4f}"
+                f"-> AUC: {top_phase2['phase2_best_auc']:.4f}"
             )
     
     # Emit run completed

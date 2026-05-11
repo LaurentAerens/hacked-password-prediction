@@ -282,6 +282,9 @@ def _run_training(top_percent: float, cv_folds: int,
                  run_phase2: bool = False,
                  phase2_top_n: int = 3,
                  phase2_trials_per_model: int = 20,
+                 max_parallel_candidates: Optional[int] = None,
+                 ram_per_candidate_gb: float = 2.0,
+                 cpu_utilization_target: float = 0.9,
                  progress_callback: Optional[Callable] = None,
                  run_id: Optional[str] = None,
                  control_signal: Optional[ControlSignal] = None,
@@ -299,6 +302,9 @@ def _run_training(top_percent: float, cv_folds: int,
         run_phase2: Whether to run Optuna Phase 2 fine-tuning
         phase2_top_n: Number of top phase1 candidates to fine-tune
         phase2_trials_per_model: Number of Optuna trials per candidate
+        max_parallel_candidates: Optional cap for concurrent model+preprocessor jobs
+        ram_per_candidate_gb: Estimated RAM usage per concurrent candidate
+        cpu_utilization_target: Fraction of requested CPUs to use
     
     Returns:
         (results_dict, logs_string)
@@ -328,6 +334,9 @@ def _run_training(top_percent: float, cv_folds: int,
             run_phase2=run_phase2,
             phase2_top_n=phase2_top_n,
             phase2_trials_per_model=phase2_trials_per_model,
+            max_parallel_candidates=max_parallel_candidates,
+            ram_per_candidate_gb=ram_per_candidate_gb,
+            cpu_utilization_target=cpu_utilization_target,
         )
 
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -358,6 +367,9 @@ def _training_worker(
     run_phase2: bool,
     phase2_top_n: int,
     phase2_trials_per_model: int,
+    max_parallel_candidates: Optional[int],
+    ram_per_candidate_gb: float,
+    cpu_utilization_target: float,
     run_id: str,
     control_signal: ControlSignal,
     checkpoint_manager: CheckpointManager,
@@ -376,6 +388,9 @@ def _training_worker(
             run_phase2=run_phase2,
             phase2_top_n=phase2_top_n,
             phase2_trials_per_model=phase2_trials_per_model,
+            max_parallel_candidates=max_parallel_candidates,
+            ram_per_candidate_gb=ram_per_candidate_gb,
+            cpu_utilization_target=cpu_utilization_target,
             progress_callback=progress_callback,
             run_id=run_id,
             control_signal=control_signal,
@@ -652,6 +667,33 @@ def _show_training_tab() -> None:
     phase2_top_n = st.slider("Phase 2: top candidates", min_value=1, max_value=8, value=3, step=1, disabled=not run_phase2)
     phase2_trials_per_model = st.slider("Phase 2: trials per candidate", min_value=5, max_value=80, value=20, step=5, disabled=not run_phase2)
 
+    with st.expander("Performance tuning (CPU/RAM)"):
+        cpu_utilization_target = st.slider(
+            "CPU utilization target",
+            min_value=0.5,
+            max_value=1.0,
+            value=0.9,
+            step=0.05,
+            help="Fraction of available CPUs to actively schedule.",
+        )
+        ram_per_candidate_gb = st.slider(
+            "Estimated RAM per concurrent candidate (GB)",
+            min_value=0.5,
+            max_value=8.0,
+            value=2.0,
+            step=0.5,
+            help="Higher value is safer for memory-heavy models; lower can increase parallelism.",
+        )
+        max_parallel_candidates_raw = st.number_input(
+            "Max parallel model+preprocessor jobs (0 = auto)",
+            min_value=0,
+            max_value=256,
+            value=0,
+            step=1,
+            help="Set 0 to let the scheduler choose automatically based on CPU and RAM.",
+        )
+        max_parallel_candidates = None if int(max_parallel_candidates_raw) == 0 else int(max_parallel_candidates_raw)
+
     # Initialize realtime dashboard state if not already present
     if "training_run_id" not in st.session_state:
         st.session_state["training_run_id"] = None
@@ -699,6 +741,9 @@ def _show_training_tab() -> None:
                 "run_phase2": run_phase2,
                 "phase2_top_n": phase2_top_n,
                 "phase2_trials_per_model": phase2_trials_per_model,
+                "max_parallel_candidates": max_parallel_candidates,
+                "ram_per_candidate_gb": ram_per_candidate_gb,
+                "cpu_utilization_target": cpu_utilization_target,
                 "run_id": run_id,
                 "control_signal": control_signal,
                 "checkpoint_manager": checkpoint_manager,

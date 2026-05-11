@@ -181,7 +181,8 @@ class SklearnHPOTrainer:
                     ('tfidf', TfidfVectorizer(max_features=5000, stop_words='english')),
                     ('svd', TruncatedSVD(n_components=100, random_state=self.random_state)),
                 ]),
-                'requires_text': True
+                'requires_text': True,
+                'incompatible_models': ['MultinomialNB']
             }
         }
     
@@ -225,8 +226,13 @@ class SklearnHPOTrainer:
         for prep_name in preprocessors:
             preprocessor = all_preprocessors[prep_name]
             prep_step = preprocessor['step']
+            incompatible_models = preprocessor.get('incompatible_models', [])
             
             for model_name in models:
+                # Skip incompatible model-preprocessor pairs
+                if model_name in incompatible_models:
+                    continue
+                
                 model_config = all_models[model_name]
                 model_estimator = model_config['estimator']
                 param_grid = model_config['params']
@@ -279,10 +285,10 @@ class SklearnHPOTrainer:
                             'auc': grid_search.best_score_
                         }
                     
-                    print(f"  {model_name:20} + {prep_name:15} → AUC: {grid_search.best_score_:.4f}")
+                    print(f"  {model_name:20} + {prep_name:15} -> AUC: {grid_search.best_score_:.4f}")
                     
                 except Exception as e:
-                    print(f"  {model_name:20} + {prep_name:15} → FAILED: {str(e)[:60]}")
+                    print(f"  {model_name:20} + {prep_name:15} -> FAILED: {str(e)[:60]}")
                     continue
         
         # Convert results to DataFrame

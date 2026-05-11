@@ -83,6 +83,29 @@ After training finishes, you'll see:
 - You can see which combinations are queued, running, or completed
 - Time Saved % shows efficiency gain from Phase 1a screening
 
+## Performance Tuning (New)
+
+The Training tab now includes **Performance tuning (CPU/RAM)** controls for smarter parallel scheduling in Phase 1a:
+
+- **CPU utilization target**: Fraction of available CPUs to use (default `0.9`)
+- **Estimated RAM per concurrent candidate (GB)**: Memory guardrail per model+preprocessor job (default `2.0`)
+- **Max parallel model+preprocessor jobs**: Hard cap for concurrent combinations (`0` = auto)
+
+How the scheduler works:
+
+1. It computes a CPU budget from your machine core count and the CPU target.
+2. It estimates safe parallel candidate count from total RAM and RAM-per-candidate.
+3. It picks an outer worker count (`parallel models`) and inner GridSearch `n_jobs` (`parallel CV/params`) to avoid heavy oversubscription.
+
+Recommended presets:
+
+- High-core workstation / multi-CPU server: CPU target `0.9` to `1.0`.
+- High-core workstation / multi-CPU server: RAM per candidate `2.0` to `4.0`.
+- High-core workstation / multi-CPU server: Max parallel jobs `0` (auto) or manual cap.
+- Laptop / low-memory machine: CPU target `0.6` to `0.8`.
+- Laptop / low-memory machine: RAM per candidate `3.0` to `6.0`.
+- Laptop / low-memory machine: Max parallel jobs explicit low value (for example `2` to `4`).
+
 ## Troubleshooting
 
 If you don't see live updates:
