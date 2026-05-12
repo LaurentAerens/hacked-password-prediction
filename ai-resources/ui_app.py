@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 import io
+import json
 import sys
 import uuid
 import time
@@ -43,6 +44,12 @@ try:
     from nn_trainer import PasswordNNTrainer
 except ImportError:
     PasswordNNTrainer = None
+
+# Try to import validate_layer_spec (optional, requires torch)
+try:
+    from nn_models import validate_layer_spec
+except ImportError:
+    validate_layer_spec = None
 
 from shared_lib.telemetry_emitter import TelemetryEmitter
 from shared_lib.data_utils import get_data
@@ -482,8 +489,9 @@ def _nn_training_worker(
             epochs=config["epochs"],
             batch_size=config["batch_size"],
             learning_rate=config["learning_rate"],
-            hidden_dim=config["hidden_dim"],
+            hidden_dim=config.get("hidden_dim", 64),
             dropout=config["dropout"],
+            layer_spec=config.get("layer_spec"),
             control_signal=control_signal,
             telemetry_emitter=telemetry_emitter,
         )
@@ -624,6 +632,45 @@ def _show_nn_training_tab() -> None:
                 ),
             })
         
+        with st.expander("⚙️ Advanced: Custom Layer Architecture"):
+            st.caption(
+                "Define custom dense layers as JSON. Each layer: `{\"units\": 128, \"activation\": \"relu\"}`. "
+                "Supported activations: relu, tanh, sigmoid, leaky_relu, elu. "
+                "Overrides the Hidden Dim slider when active."
+            )
+            _DEFAULT_LAYER_SPEC = (
+                '[\n'
+                '  {"units": 128, "activation": "relu"},\n'
+                '  {"units": 64, "activation": "tanh"},\n'
+                '  {"units": 32, "activation": "relu"}\n'
+                ']'
+            )
+            layer_spec_input = st.text_area(
+                "Layer Spec JSON",
+                value=_DEFAULT_LAYER_SPEC,
+                height=150,
+                key="nn_layer_spec_json",
+            )
+            if layer_spec_input.strip():
+                try:
+                    parsed_spec = json.loads(layer_spec_input)
+                except json.JSONDecodeError as exc:
+                    st.error(f"Invalid JSON: {exc}")
+                else:
+                    if validate_layer_spec is None:
+                        st.warning("validate_layer_spec unavailable (torch not installed).")
+                    else:
+                        valid, reason = validate_layer_spec(parsed_spec)
+                        if valid:
+                            st.success(f"✓ Custom architecture: {len(parsed_spec)} layers")
+                            nn_config["layer_spec"] = parsed_spec
+                        else:
+                            st.error(f"Invalid layer spec: {reason}")
+
+        if nn_config.get("layer_spec"):
+            st.info("Hidden Dim slider is overridden by custom layer spec.")
+            nn_config.pop("hidden_dim", None)
+
         st.session_state.nn_config = nn_config
     
     # Training Controls Section

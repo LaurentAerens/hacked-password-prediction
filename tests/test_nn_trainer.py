@@ -6,6 +6,7 @@ import torch
 import pandas as pd
 import pytest
 import tempfile
+import json
 
 # Add ai-resources directory to path
 ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
@@ -266,3 +267,87 @@ class TestPasswordNNTrainerGPU:
             
             result = trainer.train(X, y, epochs=1, batch_size=4)
             assert result["device"] == "cpu"
+
+
+class TestPasswordNNTrainerLayerSpec:
+    """Tests for layer_spec dispatch in PasswordNNTrainer.train()."""
+
+    def _make_data(self):
+        passwords = ["pass1", "pass2", "pass3", "pass4", "pass5"] * 20
+        labels = [0, 1] * 50
+        return pd.Series(passwords), pd.Series(labels)
+
+    def test_train_standard_path_has_model_class_key(self):
+        """When no layer_spec given, architecture_config must include model_class='standard'."""
+        from nn_models import PasswordCNN
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            result = trainer.train(X, y, epochs=1, batch_size=8)
+            model = result["model"]
+            assert isinstance(model, PasswordCNN)
+
+    def test_train_layer_spec_builds_configurable_model(self):
+        """When layer_spec provided, model is PasswordCNNConfigurable."""
+        from nn_models import PasswordCNNConfigurable
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            result = trainer.train(X, y, epochs=1, batch_size=8, layer_spec=[64, 32])
+            model = result["model"]
+            assert isinstance(model, PasswordCNNConfigurable)
+
+    def test_train_layer_spec_architecture_config_keys(self):
+        """When layer_spec provided, architecture_config has layer_spec and model_class='configurable'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            trainer.train(X, y, epochs=1, batch_size=8, layer_spec=[64, 32])
+            meta_files = list(Path(tmpdir).glob("final/*/metadata.json"))
+            assert len(meta_files) > 0
+            with open(meta_files[0]) as f:
+                meta = json.load(f)
+            arch = meta["architecture"]
+            assert arch.get("model_class") == "configurable"
+            assert arch.get("layer_spec") == [64, 32]
+            assert "hidden_dim" not in arch
+
+    def test_train_no_layer_spec_architecture_config_keys(self):
+        """When no layer_spec, architecture_config has model_class='standard' and hidden_dim."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            trainer.train(X, y, epochs=1, batch_size=8, hidden_dim=48)
+            meta_files = list(Path(tmpdir).glob("final/*/metadata.json"))
+            assert len(meta_files) > 0
+            with open(meta_files[0]) as f:
+                meta = json.load(f)
+            arch = meta["architecture"]
+            assert arch.get("model_class") == "standard"
+            assert arch.get("hidden_dim") == 48
+
+    def test_train_invalid_layer_spec_raises_value_error(self):
+        """Invalid layer_spec raises ValueError before training starts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            with pytest.raises(ValueError, match="Invalid layer_spec"):
+                trainer.train(X, y, epochs=1, batch_size=8, layer_spec=[{"units": 0}])
+
+    def test_train_empty_layer_spec_uses_standard_path(self):
+        """Empty layer_spec list falls back to standard path."""
+        from nn_models import PasswordCNN
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            result = trainer.train(X, y, epochs=1, batch_size=8, layer_spec=[])
+            assert isinstance(result["model"], PasswordCNN)
+
+    def test_train_layer_spec_none_uses_standard_path(self):
+        """layer_spec=None falls back to standard path."""
+        from nn_models import PasswordCNN
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = PasswordNNTrainer(model_dir=tmpdir)
+            X, y = self._make_data()
+            result = trainer.train(X, y, epochs=1, batch_size=8, layer_spec=None)
+            assert isinstance(result["model"], PasswordCNN)

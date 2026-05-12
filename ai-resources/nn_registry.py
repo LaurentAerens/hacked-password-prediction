@@ -158,17 +158,25 @@ class NNModelRegistry:
             metadata = json.load(f)
         
         # Load model state
-        model_state = torch.load(model_path)
+        model_state = torch.load(model_path, weights_only=True)
         
         # Reconstruct model from architecture config
-        from nn_models import PasswordCNN
+        from nn_models import PasswordCNN, build_model_from_spec
         
         arch_config = metadata.get("architecture", {})
-        model = PasswordCNN(
-            embedding_dim=arch_config.get("embedding_dim", 8),
-            hidden_dim=arch_config.get("hidden_dim", 64),
-            dropout=arch_config.get("dropout", 0.2)
-        )
+        model_class = arch_config.get("model_class", "standard")
+
+        if model_class == "configurable":
+            model = build_model_from_spec(
+                arch_config["layer_spec"],
+                dropout=arch_config.get("dropout", 0.2),
+            )
+        else:
+            model = PasswordCNN(
+                embedding_dim=arch_config.get("embedding_dim", 8),
+                hidden_dim=arch_config.get("hidden_dim", 64),
+                dropout=arch_config.get("dropout", 0.2),
+            )
         model.load_state_dict(model_state)
         
         return model, metadata

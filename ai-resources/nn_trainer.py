@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
 from nn_tokenizer import PasswordTokenizer
-from nn_models import PasswordCNN
+from nn_models import PasswordCNN, build_model_from_spec, validate_layer_spec
 from nn_registry import NNModelRegistry
 from shared_lib.control_signal import ControlSignal
 from shared_lib.telemetry_emitter import TelemetryEmitter
@@ -100,6 +100,7 @@ class PasswordNNTrainer:
         hidden_dim: int = 64,
         dropout: float = 0.2,
         val_split: float = 0.2,
+        layer_spec: list = None,
         control_signal: Optional[ControlSignal] = None,
         telemetry_emitter: Optional[TelemetryEmitter] = None,
     ) -> Dict[str, Any]:
@@ -161,7 +162,13 @@ class PasswordNNTrainer:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         
         # Create model, optimizer, loss
-        model = PasswordCNN(hidden_dim=hidden_dim, dropout=dropout).to(self.device)
+        if layer_spec:
+            valid, reason = validate_layer_spec(layer_spec)
+            if not valid:
+                raise ValueError(f"Invalid layer_spec: {reason}")
+            model = build_model_from_spec(layer_spec, dropout=dropout, device=self.device)
+        else:
+            model = PasswordCNN(hidden_dim=hidden_dim, dropout=dropout).to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         loss_fn = nn.BCEWithLogitsLoss()
         
@@ -279,12 +286,22 @@ class PasswordNNTrainer:
             model.load_state_dict(best_model_state)
         
         # Save best model
-        architecture_config = {
-            "embedding_dim": 8,
-            "hidden_dim": hidden_dim,
-            "dropout": dropout,
-            "kernel_sizes": [2, 3, 4]
-        }
+        if layer_spec:
+            architecture_config = {
+                "embedding_dim": 8,
+                "dropout": dropout,
+                "kernel_sizes": [2, 3, 4],
+                "model_class": "configurable",
+                "layer_spec": layer_spec,
+            }
+        else:
+            architecture_config = {
+                "embedding_dim": 8,
+                "hidden_dim": hidden_dim,
+                "dropout": dropout,
+                "kernel_sizes": [2, 3, 4],
+                "model_class": "standard",
+            }
         training_config = {
             "epochs": epochs,
             "batch_size": batch_size,

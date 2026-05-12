@@ -268,3 +268,52 @@ class TestNNModelRegistry:
             assert (registry_path / "checkpoints").exists()
             assert (registry_path / "final").exists()
             assert (registry_path / "history").exists()
+
+    def test_load_best_model_configurable(self):
+        """load_best_model reconstructs PasswordCNNConfigurable when model_class=configurable."""
+        from nn_models import PasswordCNNConfigurable, build_model_from_spec
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = NNModelRegistry(registry_dir=tmpdir)
+
+            layer_spec = [{"units": 64, "activation": "relu"}, {"units": 32, "activation": "relu"}]
+            model = build_model_from_spec(layer_spec, dropout=0.3)
+            architecture_config = {
+                "model_class": "configurable",
+                "layer_spec": layer_spec,
+                "dropout": 0.3,
+            }
+            run_id = "configurable-load-001"
+            registry.save_best_model(
+                run_id=run_id,
+                model=model,
+                architecture_config=architecture_config,
+                metrics={"val_loss": 0.2},
+                training_config={"epochs": 5},
+            )
+
+            loaded_model, loaded_metadata = registry.load_best_model(run_id)
+
+            assert isinstance(loaded_model, PasswordCNNConfigurable)
+            assert loaded_metadata["run_id"] == run_id
+
+    def test_load_best_model_backward_compat_no_model_class(self):
+        """load_best_model falls back to PasswordCNN when model_class key is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = NNModelRegistry(registry_dir=tmpdir)
+
+            model = PasswordCNN()
+            # Deliberately omit model_class (pre-existing saved model format)
+            architecture_config = {"embedding_dim": 8, "hidden_dim": 64, "dropout": 0.2}
+            run_id = "compat-load-001"
+            registry.save_best_model(
+                run_id=run_id,
+                model=model,
+                architecture_config=architecture_config,
+                metrics={"val_loss": 0.15},
+                training_config={"epochs": 10},
+            )
+
+            loaded_model, loaded_metadata = registry.load_best_model(run_id)
+
+            assert isinstance(loaded_model, PasswordCNN)
+            assert loaded_metadata["run_id"] == run_id

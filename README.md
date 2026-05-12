@@ -114,6 +114,8 @@ python scripts/install.py --gpu
 
 Internally the script uses `constraints.txt` to pin `protobuf` to a compatible version.
 
+Python version note: on Python 3.12+ the installer uses TensorFlow 2.18.x and a compatible protobuf 5.x pin; on older Python versions it keeps the TensorFlow 2.11/protobuf 3.19.x path.
+
 Note: Streamlit (UI) depends on a newer `protobuf` than TensorFlow 2.11 allows. To avoid conflicts we split packages:
 
 - Core/training dependencies: `requirements-core.txt` (used by hardware-specific installs)
