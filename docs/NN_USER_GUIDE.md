@@ -54,7 +54,7 @@ Use all three when you want:
 1. Install Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 pip install torch
 ```
 
@@ -93,7 +93,7 @@ Current requirements file includes core ML packages and Streamlit. PyTorch must 
 Recommended installation flow:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 pip install torch
 ```
 
@@ -628,7 +628,7 @@ Checks:
 Install:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 pip install torch
 ```
 

@@ -7,7 +7,6 @@ Benchmarks:
 - Dataset scaling (1k → 10k → 100k)
 """
 
-import sys
 from pathlib import Path
 import time
 import tempfile
@@ -18,15 +17,11 @@ import pytest
 import psutil
 from sklearn.ensemble import RandomForestClassifier
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from adaptive_trainer import train_with_adaptive_search
-from nn_trainer import PasswordNNTrainer
-from nn_tokenizer import PasswordTokenizer
-from nn_models import PasswordCNN
-from ensemble import EnsemblePredictor
+from harp.adaptive_trainer import train_with_adaptive_search
+from harp.nn_trainer import PasswordNNTrainer
+from harp.nn_tokenizer import PasswordTokenizer
+from harp.nn_models import PasswordCNN
+from harp.ensemble import EnsemblePredictor
 
 
 # ============================================================================

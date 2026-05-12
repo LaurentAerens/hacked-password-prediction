@@ -12,15 +12,10 @@ Tests:
 8. No syntax errors in ui_app.py
 """
 
-import sys
 from pathlib import Path
 
-# Add ai-resources to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.realtime_dashboard import RealtimeDashboardState
-from shared_lib.telemetry_emitter import TelemetryEmitter, ProgressEvent
+from harp.shared_lib.realtime_dashboard import RealtimeDashboardState
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter, ProgressEvent
 
 
 def test_1_dashboard_initialization():

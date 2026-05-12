@@ -1,7 +1,6 @@
 """Regression tests for slider path and JSON layer_spec dispatch in NN training."""
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 
@@ -10,13 +9,9 @@ import pytest
 import torch
 
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_models import PasswordCNN, PasswordCNNConfigurable
-from nn_registry import NNModelRegistry
-from nn_trainer import PasswordNNTrainer
+from harp.nn_models import PasswordCNN, PasswordCNNConfigurable
+from harp.nn_registry import NNModelRegistry
+from harp.nn_trainer import PasswordNNTrainer
 
 
 def _make_tiny_data() -> tuple[pd.Series, pd.Series]:

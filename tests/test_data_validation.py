@@ -7,19 +7,14 @@ Tests ensure:
 - No NaN/Inf in outputs
 """
 
-import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
 import pytest
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_tokenizer import PasswordTokenizer
-from nn_models import PasswordCNN
+from harp.nn_tokenizer import PasswordTokenizer
+from harp.nn_models import PasswordCNN
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 

@@ -14,16 +14,11 @@ import threading
 import time
 import tempfile
 from pathlib import Path
-import sys
 
-# Add ai-resources to path
-ai_resources_path = Path(__file__).resolve().parent.parent / "ai-resources"
-sys.path.insert(0, str(ai_resources_path))
-
-from shared_lib.control_signal import ControlSignal
-from shared_lib.checkpoint_manager import CheckpointManager
-from adaptive_trainer import train_with_adaptive_search
-from shared_lib.data_utils import get_data
+from harp.shared_lib.control_signal import ControlSignal
+from harp.shared_lib.checkpoint_manager import CheckpointManager
+from harp.adaptive_trainer import train_with_adaptive_search
+from harp.shared_lib.data_utils import get_data
 
 
 class TestTrainingControls:

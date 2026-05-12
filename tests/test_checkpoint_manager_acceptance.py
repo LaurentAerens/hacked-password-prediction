@@ -20,17 +20,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 
-import sys
-from pathlib import Path as PathlibPath
-parent_dir = str(PathlibPath(__file__).parent.parent)
-sys.path.insert(0, parent_dir)
-
-import importlib.util
-checkpoint_manager_path = PathlibPath(parent_dir) / "ai-resources" / "shared_lib" / "checkpoint_manager.py"
-spec = importlib.util.spec_from_file_location("checkpoint_manager", checkpoint_manager_path)
-checkpoint_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(checkpoint_module)
-CheckpointManager = checkpoint_module.CheckpointManager
+from harp.shared_lib.checkpoint_manager import CheckpointManager
 
 
 class TestAcceptanceCriteria:

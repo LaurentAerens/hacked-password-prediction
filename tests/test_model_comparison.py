@@ -1,6 +1,5 @@
 """Tests for ModelComparison."""
 
-import sys
 from pathlib import Path
 import pytest
 import tempfile
@@ -9,12 +8,8 @@ import joblib
 import pandas as pd
 import numpy as np
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from model_comparison import ModelComparison
-from model_registry import UnifiedModelRegistry
+from harp.model_comparison import ModelComparison
+from harp.model_registry import UnifiedModelRegistry
 
 
 class TestModelComparison:

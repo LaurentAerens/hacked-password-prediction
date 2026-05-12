@@ -2,15 +2,10 @@
 Simple test runner for telemetry emitter without pytest.
 """
 
-import sys
 import os
 from pathlib import Path
 
-# Add ai-resources directory to path to match how the app imports
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.telemetry_emitter import TelemetryEmitter, create_emitter
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter, create_emitter
 from datetime import datetime
 
 def test_basic_event_emission():

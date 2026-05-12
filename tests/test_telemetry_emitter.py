@@ -13,15 +13,10 @@ import uuid
 from datetime import datetime
 from typing import List, Dict, Optional
 from unittest.mock import patch, MagicMock
-import sys
 import os
 from pathlib import Path
 
-# Add ai-resources to path (with hyphen converted to underscore for imports)
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.telemetry_emitter import (
+from harp.shared_lib.telemetry_emitter import (
     TelemetryEmitter, 
     ProgressEvent,
     create_emitter,

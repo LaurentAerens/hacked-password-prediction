@@ -29,7 +29,7 @@ See [docs/MIGRATION_V1_TO_V2.md](docs/MIGRATION_V1_TO_V2.md) for upgrade guidanc
 
 ## Background
 
-In 2021 during COVID, I set up an SSH honeypot to collect real-world password attempts. This data is now used as a dataset for password strength classification.
+In 2021 during COVID, I set up an SSH honeypot mainly as a college experiment. The captured real-world password attempts are now used as a dataset for password strength classification.
 
 Original data: [SSH-findings](https://github.com/anakwaboe4/SSH-findings) project
 
@@ -39,98 +39,107 @@ Simple classification task: predict if a given string would likely be in the lis
 
 ## Usage
 
-Install requirements:
+### Quick Start (Recommended)
+
+**Setup (one-time):**
 
 ```bash
-pip install -r requirements.txt
+# Clone and cd into the repo
+git clone https://github.com/yourusername/hacked-password-prediction.git
+cd hacked-password-prediction
+
+# Create a virtual environment
+python -m venv .venv
+
+# Activate it (Windows PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Install the package (with automatic hardware detection)
+pip install -e .
+python install/install.py --auto
 ```
 
-### Manual
-
-Run the trainer:
+**Run the training CLI:**
 
 ```bash
-python ai-resources/main.py
+harp-train
 ```
 
-Run the new UI (Python + Streamlit):
-
-If you installed the UI with the helper (`--with-ui`), Streamlit is installed into `.venv-ui` to avoid protobuf conflicts with TensorFlow. Run the app using the venv Python:
-
-```powershell
-.venv-ui\Scripts\python.exe -m streamlit run ai-resources/ui_app.py
-```
-
-Or activate the venv and run Streamlit normally:
-
-```powershell
-.venv-ui\Scripts\Activate.ps1
-streamlit run ai-resources/ui_app.py
-```
-
-Do not run `ui_app.py` directly with `python`. Streamlit apps should be started with `-m streamlit run`.
-
-If you see an error like "ImportError: cannot import name 'builder' from 'google.protobuf.internal'", it means your current Python environment has an incompatible `protobuf` version; use the `.venv-ui` environment (above) so Streamlit uses a compatible protobuf.
-
-### API
-
-Run the API server:
+Or manually invoke via Python:
 
 ```bash
-python application.py
+python -m harp.main
 ```
 
-**Note**: The API is under development. 🚧
-
----
-
-**Automatic, hardware-aware install**
-
-There is a helper installer that detects your hardware and installs the best-matching requirements (pins `protobuf` for compatibility):
-
-- Auto-detect and install (recommended):
+**Run the Streamlit UI:**
 
 ```bash
-python scripts/install.py --auto
+python -m streamlit run src/harp/ui_app.py
 ```
 
-- Force Intel-optimized build:
+### Customization
+
+**For GPU support:**
 
 ```bash
-python scripts/install.py --intel
+pip install -r requirements/requirements-gpu.txt
 ```
 
-- Force generic CPU build:
+**For Intel optimization:**
 
 ```bash
-python scripts/install.py --cpu
+pip install -r requirements/requirements-intel.txt
 ```
 
-- Force GPU build (ensure CUDA/cuDNN installed):
+**For development (with testing tools):**
 
 ```bash
-python scripts/install.py --gpu
-```
-
-Internally the script uses `constraints.txt` to pin `protobuf` to a compatible version.
-
-Python version note: on Python 3.12+ the installer uses TensorFlow 2.18.x and a compatible protobuf 5.x pin; on older Python versions it keeps the TensorFlow 2.11/protobuf 3.19.x path.
-
-Note: Streamlit (UI) depends on a newer `protobuf` than TensorFlow 2.11 allows. To avoid conflicts we split packages:
-
-- Core/training dependencies: `requirements-core.txt` (used by hardware-specific installs)
-- UI dependencies: `requirements-ui.txt` (install separately if you want the Streamlit app)
-
-Install the UI into a separate virtual environment:
-
-```bash
-python -m venv .venv-ui
-.venv-ui\Scripts\activate
-pip install -r requirements-ui.txt
+pip install -e ".[dev]"
+pytest tests/
 ```
 
 ---
 
-**Current Status**: Under active development - Phase 1-2 in progress.  
-**Last Updated**: May 2026
+## Project Structure
+
+```
+.
+├── src/harp/              # Source code (package)
+│   ├── main.py            # CLI trainer
+│   ├── ui_app.py          # Streamlit UI
+│   ├── adaptive_trainer.py # HPO engine
+│   ├── shared_lib/        # Common utilities
+│   └── modern_trainers/   # Trainer implementations
+├── data/                  # CSV datasets
+├── results/               # Generated artifacts (training checkpoints, logs)
+├── tests/                 # Test suite
+├── debug/                 # Debug/experimental scripts
+├── docs/                  # Documentation
+├── install/               # Installation helpers
+├── pyproject.toml         # Package configuration
+├── requirements/          # Dependency pins and constraints
+└── README.md              # This file
+```
+
+---
+
+## API Server (In Development)
+
+The API is under development and not yet functional.
+
+---
+
+## Documentation
+
+- [Neural Network Guide](docs/NN_USER_GUIDE.md) — NN training, API reference, FAQ
+- [Training Controls](docs/TRAINING_CONTROLS_USER_GUIDE.md) — Phase 1/2 HPO control signals
+- [GPU Acceleration](docs/GPU_ACCELERATION_GUIDE.md) — GPU setup and benchmarks
+- [v1→v2 Migration](docs/MIGRATION_V1_TO_V2.md) — Upgrading from v1
+
+---
+
+## Contributing
+
+Current status: Phase 1-2 active development.  
+Last updated: May 2026
 

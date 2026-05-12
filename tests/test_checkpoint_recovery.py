@@ -7,7 +7,6 @@ Tests ensure:
 - Recovery after storage
 """
 
-import sys
 from pathlib import Path
 import tempfile
 import torch
@@ -17,14 +16,10 @@ import joblib
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_trainer import PasswordNNTrainer
-from nn_models import PasswordCNN
-from shared_lib.checkpoint_manager import CheckpointManager
-from adaptive_trainer import train_with_adaptive_search
+from harp.nn_trainer import PasswordNNTrainer
+from harp.nn_models import PasswordCNN
+from harp.shared_lib.checkpoint_manager import CheckpointManager
+from harp.adaptive_trainer import train_with_adaptive_search
 
 
 # ============================================================================

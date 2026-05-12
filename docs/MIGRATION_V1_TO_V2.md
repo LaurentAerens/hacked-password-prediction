@@ -114,7 +114,7 @@ No Azure secrets or credentials required!
 
 **Cause**: v2 doesn't require Azure SDK.
 
-**Solution**: Remove Azure imports; install v2 requirements: `pip install -r requirements.txt`
+**Solution**: Remove Azure imports; install v2 requirements: `pip install -r requirements/requirements.txt`
 
 ### Issue: Model persistence incompatible
 

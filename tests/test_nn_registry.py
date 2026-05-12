@@ -1,18 +1,13 @@
 """Tests for NNModelRegistry."""
 
-import sys
 from pathlib import Path
 import torch
 import json
 import tempfile
 import pytest
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_registry import NNModelRegistry
-from nn_models import PasswordCNN
+from harp.nn_registry import NNModelRegistry
+from harp.nn_models import PasswordCNN
 
 
 class TestNNModelRegistry:
@@ -271,7 +266,7 @@ class TestNNModelRegistry:
 
     def test_load_best_model_configurable(self):
         """load_best_model reconstructs PasswordCNNConfigurable when model_class=configurable."""
-        from nn_models import PasswordCNNConfigurable, build_model_from_spec
+        from harp.nn_models import PasswordCNNConfigurable, build_model_from_spec
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = NNModelRegistry(registry_dir=tmpdir)
 

@@ -1,15 +1,10 @@
 """Tests for PasswordCNN model."""
 
-import sys
 from pathlib import Path
 import torch
 import pytest
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_models import PasswordCNN, PasswordCNNConfigurable
+from harp.nn_models import PasswordCNN, PasswordCNNConfigurable
 
 
 class TestPasswordCNN:
@@ -212,21 +207,21 @@ class TestPasswordCNNConfigurableDictHiddenDims:
 
     def test_dict_hidden_dims_basic(self):
         """List of dicts is accepted and produces correct output shape."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         model = PasswordCNNConfigurable(hidden_dims=[{"units": 64}, {"units": 32}])
         x = torch.randn(4, 32, 8)
         assert model(x).shape == (4, 1)
 
     def test_dict_hidden_dims_with_activation(self):
         """Dict with explicit activation key is applied correctly."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         model = PasswordCNNConfigurable(hidden_dims=[{"units": 64, "activation": "tanh"}])
         x = torch.randn(4, 32, 8)
         assert model(x).shape == (4, 1)
 
     def test_dict_hidden_dims_all_activations(self):
         """All supported activation strings are accepted."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         for act in ("relu", "tanh", "sigmoid", "leaky_relu", "elu"):
             model = PasswordCNNConfigurable(hidden_dims=[{"units": 32, "activation": act}])
             x = torch.randn(2, 32, 8)
@@ -234,13 +229,13 @@ class TestPasswordCNNConfigurableDictHiddenDims:
 
     def test_dict_hidden_dims_unknown_activation_raises(self):
         """Unknown activation string raises ValueError with clear message."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         with pytest.raises(ValueError, match="swish"):
             PasswordCNNConfigurable(hidden_dims=[{"units": 32, "activation": "swish"}])
 
     def test_dict_hidden_dims_per_layer_dropout(self):
         """Dict entry with 'dropout' overrides class-level dropout for that layer."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         model = PasswordCNNConfigurable(
             hidden_dims=[{"units": 64, "dropout": 0.5}, {"units": 32}],
             dropout=0.1,
@@ -250,21 +245,21 @@ class TestPasswordCNNConfigurableDictHiddenDims:
 
     def test_mixed_list_int_and_dict(self):
         """Mixed list of ints and dicts is coerced correctly."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         model = PasswordCNNConfigurable(hidden_dims=[64, {"units": 32, "activation": "elu"}])
         x = torch.randn(4, 32, 8)
         assert model(x).shape == (4, 1)
 
     def test_int_list_backward_compat(self):
         """Plain int list still works (backward compat)."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         model = PasswordCNNConfigurable(hidden_dims=[128, 64])
         x = torch.randn(4, 32, 8)
         assert model(x).shape == (4, 1)
 
     def test_dict_missing_units_raises(self):
         """Dict entry without 'units' key raises ValueError."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         with pytest.raises((ValueError, KeyError)):
             PasswordCNNConfigurable(hidden_dims=[{"activation": "relu"}])
 
@@ -273,45 +268,45 @@ class TestBuildModelFromSpec:
     """Tests for module-level build_model_from_spec function."""
 
     def test_basic_spec_returns_model(self):
-        from nn_models import build_model_from_spec, PasswordCNNConfigurable
+        from harp.nn_models import build_model_from_spec, PasswordCNNConfigurable
         model = build_model_from_spec([{"units": 64}, {"units": 32}])
         assert isinstance(model, PasswordCNNConfigurable)
 
     def test_int_entries_normalized(self):
         """Int entries in spec are coerced to dict."""
-        from nn_models import build_model_from_spec, PasswordCNNConfigurable
+        from harp.nn_models import build_model_from_spec, PasswordCNNConfigurable
         model = build_model_from_spec([64, 32])
         assert isinstance(model, PasswordCNNConfigurable)
         x = torch.randn(4, 32, 8)
         assert model(x).shape == (4, 1)
 
     def test_empty_spec_raises(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         with pytest.raises(ValueError, match="non-empty"):
             build_model_from_spec([])
 
     def test_non_list_spec_raises(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         with pytest.raises(ValueError):
             build_model_from_spec(None)
 
     def test_zero_units_raises(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         with pytest.raises(ValueError, match="units"):
             build_model_from_spec([{"units": 0}])
 
     def test_negative_units_raises(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         with pytest.raises(ValueError, match="units"):
             build_model_from_spec([{"units": -8}])
 
     def test_custom_dropout_applied(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         model = build_model_from_spec([{"units": 32}], dropout=0.5)
         assert model(torch.randn(2, 32, 8)).shape == (2, 1)
 
     def test_device_cpu_moved(self):
-        from nn_models import build_model_from_spec
+        from harp.nn_models import build_model_from_spec
         import torch
         model = build_model_from_spec([{"units": 32}], device=torch.device("cpu"))
         for p in model.parameters():
@@ -322,47 +317,47 @@ class TestValidateLayerSpec:
     """Tests for module-level validate_layer_spec function."""
 
     def test_valid_dict_spec(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([{"units": 64}, {"units": 32}])
         assert ok is True
         assert msg == ""
 
     def test_valid_int_spec(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([64, 32])
         assert ok is True
 
     def test_empty_list_invalid(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([])
         assert ok is False
         assert msg != ""
 
     def test_none_invalid(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec(None)
         assert ok is False
 
     def test_zero_units_invalid(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([{"units": 0}])
         assert ok is False
         assert "units" in msg.lower()
 
     def test_negative_units_invalid(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([{"units": -1}])
         assert ok is False
 
     def test_does_not_raise(self):
         """validate_layer_spec must never raise — always returns tuple."""
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         result = validate_layer_spec("not a list")
         assert isinstance(result, tuple)
         assert result[0] is False
 
     def test_unknown_activation_invalid(self):
-        from nn_models import validate_layer_spec
+        from harp.nn_models import validate_layer_spec
         ok, msg = validate_layer_spec([{"units": 32, "activation": "swish"}])
         assert ok is False
         assert "swish" in msg

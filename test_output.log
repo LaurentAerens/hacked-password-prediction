@@ -1,0 +1,38 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\laerens\AppData\Local\Programs\Python\Python312\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\laerens\source\repos\Personal\hacked-password-prediction
+plugins: anyio-4.12.1, Faker-20.1.0
+collecting ... collected 29 items
+
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationWellFormed::test_well_formed_event_has_all_required_fields PASSED [  3%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationWellFormed::test_well_formed_event_field_types_strict PASSED [  6%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationWellFormed::test_well_formed_event_iso8601_timestamp PASSED [ 10%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationWellFormed::test_well_formed_event_progress_pct_calculated PASSED [ 13%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationMalformed::test_malformed_event_missing_required_field_run_id PASSED [ 17%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationMalformed::test_malformed_event_missing_required_field_seq PASSED [ 20%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationMalformed::test_malformed_event_wrong_type_seq_is_string PASSED [ 24%]
+tests/test_tpv_005_mvp_validation.py::TestSchemaValidationMalformed::test_malformed_event_invalid_iso8601_timestamp PASSED [ 27%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationMonotonic::test_ordering_monotonic_sequence_per_run_id PASSED [ 31%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationMonotonic::test_ordering_no_reordering_with_monotonic_input PASSED [ 34%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationMonotonic::test_ordering_render_cursor_tracks_latest_seq PASSED [ 37%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationOutOfOrder::test_ordering_reject_out_of_order_event_seq_backward PASSED [ 41%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationOutOfOrder::test_ordering_reject_out_of_order_event_seq_gap PASSED [ 44%]
+tests/test_tpv_005_mvp_validation.py::TestOrderingValidationOutOfOrder::test_ordering_run_id_stability_isolates_sequences PASSED [ 48%]
+tests/test_tpv_005_mvp_validation.py::TestParityValidationCallbackAbsentBehavior::test_parity_oracle_validates_result_contract PASSED [ 51%]
+tests/test_tpv_005_mvp_validation.py::TestParityValidationCallbackAbsentBehavior::test_parity_oracle_rejects_missing_required_field PASSED [ 55%]
+tests/test_tpv_005_mvp_validation.py::TestParityValidationCallbackAbsentBehavior::test_parity_oracle_rejects_wrong_field_type PASSED [ 58%]
+tests/test_tpv_005_mvp_validation.py::TestDeduplicationValidation::test_deduplication_duplicate_event_id_rejected PASSED [ 62%]
+tests/test_tpv_005_mvp_validation.py::TestDeduplicationValidation::test_deduplication_uses_run_id_seq_event_id PASSED [ 65%]
+tests/test_tpv_005_mvp_validation.py::TestFailurePathsPhaseUnavailability::test_failure_path_phase_1a_all_combinations_fail PASSED [ 68%]
+tests/test_tpv_005_mvp_validation.py::TestFailurePathsMalformedEvents::test_failure_path_malformed_json_event PASSED [ 72%]
+tests/test_tpv_005_mvp_validation.py::TestFailurePathsMalformedEvents::test_failure_path_event_missing_critical_fields PASSED [ 75%]
+tests/test_tpv_005_mvp_validation.py::TestFailurePathsOverlappingRuns::test_failure_path_overlapping_runs_stale_rejection PASSED [ 79%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_schema_validation_0_errors_on_wellformed PASSED [ 82%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_schema_validation_100pct_detection_malformed PASSED [ 86%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_ordering_validation_0_reordering_monotonic PASSED [ 89%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_ordering_validation_100pct_drop_out_of_order PASSED [ 93%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_parity_validation_callback_off_vs_on PASSED [ 96%]
+tests/test_tpv_005_mvp_validation.py::TestComprehensiveValidationCoverage::test_coverage_failure_paths_all_scenarios PASSED [100%]
+
+============================= 29 passed in 2.63s ==============================

@@ -9,19 +9,14 @@ Validates:
 - Results display and model download
 """
 
-import sys
 from pathlib import Path
 from typing import Dict, Any
 import tempfile
 import pandas as pd
 import pytest
 
-# Add ai-resources to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.telemetry_emitter import TelemetryEmitter, ProgressEvent
-from shared_lib.control_signal import ControlSignal
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter, ProgressEvent
+from harp.shared_lib.control_signal import ControlSignal
 
 
 class TestTelemetryEmitterEventBuffer:

@@ -1,6 +1,5 @@
 """Tests for EnsemblePredictor."""
 
-import sys
 from pathlib import Path
 import torch
 import pandas as pd
@@ -9,13 +8,9 @@ import pytest
 import tempfile
 import joblib
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from ensemble import EnsemblePredictor
-from nn_models import PasswordCNN
-from nn_tokenizer import PasswordTokenizer
+from harp.ensemble import EnsemblePredictor
+from harp.nn_models import PasswordCNN
+from harp.nn_tokenizer import PasswordTokenizer
 
 
 class TestEnsemblePredictor:

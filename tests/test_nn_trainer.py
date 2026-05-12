@@ -1,6 +1,5 @@
 """Tests for PasswordNNTrainer."""
 
-import sys
 from pathlib import Path
 import torch
 import pandas as pd
@@ -8,13 +7,9 @@ import pytest
 import tempfile
 import json
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_trainer import PasswordNNTrainer, GPUManager
-from shared_lib.control_signal import ControlSignal
-from shared_lib.telemetry_emitter import TelemetryEmitter
+from harp.nn_trainer import PasswordNNTrainer, GPUManager
+from harp.shared_lib.control_signal import ControlSignal
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter
 
 
 class TestGPUManager:
@@ -279,7 +274,7 @@ class TestPasswordNNTrainerLayerSpec:
 
     def test_train_standard_path_has_model_class_key(self):
         """When no layer_spec given, architecture_config must include model_class='standard'."""
-        from nn_models import PasswordCNN
+        from harp.nn_models import PasswordCNN
         with tempfile.TemporaryDirectory() as tmpdir:
             trainer = PasswordNNTrainer(model_dir=tmpdir)
             X, y = self._make_data()
@@ -289,7 +284,7 @@ class TestPasswordNNTrainerLayerSpec:
 
     def test_train_layer_spec_builds_configurable_model(self):
         """When layer_spec provided, model is PasswordCNNConfigurable."""
-        from nn_models import PasswordCNNConfigurable
+        from harp.nn_models import PasswordCNNConfigurable
         with tempfile.TemporaryDirectory() as tmpdir:
             trainer = PasswordNNTrainer(model_dir=tmpdir)
             X, y = self._make_data()
@@ -336,7 +331,7 @@ class TestPasswordNNTrainerLayerSpec:
 
     def test_train_empty_layer_spec_uses_standard_path(self):
         """Empty layer_spec list falls back to standard path."""
-        from nn_models import PasswordCNN
+        from harp.nn_models import PasswordCNN
         with tempfile.TemporaryDirectory() as tmpdir:
             trainer = PasswordNNTrainer(model_dir=tmpdir)
             X, y = self._make_data()
@@ -345,7 +340,7 @@ class TestPasswordNNTrainerLayerSpec:
 
     def test_train_layer_spec_none_uses_standard_path(self):
         """layer_spec=None falls back to standard path."""
-        from nn_models import PasswordCNN
+        from harp.nn_models import PasswordCNN
         with tempfile.TemporaryDirectory() as tmpdir:
             trainer = PasswordNNTrainer(model_dir=tmpdir)
             X, y = self._make_data()

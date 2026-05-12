@@ -7,7 +7,6 @@ Tests ensure:
 - Training errors (NaN loss, exploding gradients)
 """
 
-import sys
 from pathlib import Path
 import tempfile
 import io
@@ -16,14 +15,10 @@ import numpy as np
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from nn_trainer import PasswordNNTrainer, GPUManager
-from nn_tokenizer import PasswordTokenizer
-from nn_models import PasswordCNN
-from adaptive_trainer import train_with_adaptive_search
+from harp.nn_trainer import PasswordNNTrainer, GPUManager
+from harp.nn_tokenizer import PasswordTokenizer
+from harp.nn_models import PasswordCNN
+from harp.adaptive_trainer import train_with_adaptive_search
 
 
 # ============================================================================

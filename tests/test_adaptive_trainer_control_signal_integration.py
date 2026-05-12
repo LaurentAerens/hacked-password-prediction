@@ -10,7 +10,6 @@ Acceptance criteria:
 """
 
 import pytest
-import sys
 import os
 import tempfile
 import shutil
@@ -20,13 +19,9 @@ import pandas as pd
 import numpy as np
 import threading
 
-# Add ai-resources to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from adaptive_trainer import train_with_adaptive_search
-from shared_lib.control_signal import ControlSignal
-from shared_lib.checkpoint_manager import CheckpointManager
+from harp.adaptive_trainer import train_with_adaptive_search
+from harp.shared_lib.control_signal import ControlSignal
+from harp.shared_lib.checkpoint_manager import CheckpointManager
 
 
 class TestAdaptiveTrainerControlSignalIntegration:

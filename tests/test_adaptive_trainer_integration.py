@@ -8,17 +8,12 @@ Tests that:
 4. Sequence of events follows expected lifecycle
 """
 
-import sys
 import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
 
-# Add ai-resources directory to path to match how the app imports
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from adaptive_trainer import train_with_adaptive_search
+from harp.adaptive_trainer import train_with_adaptive_search
 
 
 def test_adaptive_trainer_without_callback():

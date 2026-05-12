@@ -1,6 +1,5 @@
 """Tests for UnifiedModelRegistry."""
 
-import sys
 from pathlib import Path
 import pytest
 import tempfile
@@ -8,12 +7,8 @@ import json
 import joblib
 import torch
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from model_registry import UnifiedModelRegistry
-from nn_models import PasswordCNN
+from harp.model_registry import UnifiedModelRegistry
+from harp.nn_models import PasswordCNN
 
 
 class TestUnifiedModelRegistry:

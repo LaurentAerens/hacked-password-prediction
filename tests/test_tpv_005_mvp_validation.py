@@ -19,24 +19,20 @@ import json
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Any
 from unittest.mock import MagicMock, patch
-import sys
 import os
 from pathlib import Path
-
-# Add ai-resources to path (with hyphen converted to underscore for imports)
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
+import sys
 
 # Add docs/plan path for parity oracle
 plan_path = str(Path(__file__).parent.parent / "docs" / "plan" / "20260508-training-progress-visibility")
 sys.path.insert(0, plan_path)
 
-from shared_lib.telemetry_emitter import (
+from harp.shared_lib.telemetry_emitter import (
     TelemetryEmitter, 
     ProgressEvent,
     create_emitter,
 )
-from shared_lib.realtime_dashboard import RealtimeDashboardState
+from harp.shared_lib.realtime_dashboard import RealtimeDashboardState
 from parity_oracle import ParityOracle, ParityValidationError
 
 

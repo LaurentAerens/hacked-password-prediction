@@ -1,9 +1,7 @@
 """Final integration test: Telemetry Emitter -> Realtime Dashboard."""
-import sys
-sys.path.insert(0, 'ai-resources')
 
-from shared_lib.telemetry_emitter import TelemetryEmitter
-from shared_lib.realtime_dashboard import RealtimeDashboardState
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter
+from harp.shared_lib.realtime_dashboard import RealtimeDashboardState
 
 # Simulate complete training flow
 print("=" * 70)

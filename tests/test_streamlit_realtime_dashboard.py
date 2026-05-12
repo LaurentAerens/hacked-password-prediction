@@ -9,17 +9,12 @@ Validates:
 - Stale run prevention
 """
 
-import sys
 import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 
-# Add ai-resources to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.telemetry_emitter import ProgressEvent
+from harp.shared_lib.telemetry_emitter import ProgressEvent
 
 
 class RealtimeDashboardState:

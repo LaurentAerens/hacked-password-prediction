@@ -8,16 +8,11 @@ Validates:
 - Live rendering loop behavior
 """
 
-import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Add ai-resources to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from shared_lib.telemetry_emitter import ProgressEvent
-from shared_lib.realtime_dashboard import RealtimeDashboardState
+from harp.shared_lib.telemetry_emitter import ProgressEvent
+from harp.shared_lib.realtime_dashboard import RealtimeDashboardState
 
 
 def simulate_training_events(state: RealtimeDashboardState, run_count: int = 2) -> None:

@@ -3,26 +3,10 @@ Quick validation that telemetry emitter integration is correctly implemented.
 Checks imports, function signatures, and event emission without full training.
 """
 
-import sys
 import os
 from pathlib import Path
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-print("=" * 70)
-print("Quick Validation: Telemetry Emitter Integration")
-print("=" * 70)
-
-# Test 1: Import telemetry emitter
-print("\n[1/5] Testing telemetry emitter import...")
-try:
-    from shared_lib.telemetry_emitter import TelemetryEmitter, create_emitter
-    print("✓ Telemetry emitter imports successfully")
-except Exception as e:
-    print(f"✗ Failed to import telemetry emitter: {e}")
-    sys.exit(1)
+from harp.shared_lib.telemetry_emitter import TelemetryEmitter, create_emitter
 
 # Test 2: Create emitter instance
 print("\n[2/5] Testing emitter instantiation...")
@@ -59,7 +43,7 @@ except Exception as e:
 # Test 4: Import adaptive trainer
 print("\n[4/5] Testing adaptive trainer import...")
 try:
-    from adaptive_trainer import train_with_adaptive_search
+    from harp.adaptive_trainer import train_with_adaptive_search
     print("✓ Adaptive trainer imports successfully")
 except Exception as e:
     print(f"✗ Failed to import adaptive trainer: {e}")

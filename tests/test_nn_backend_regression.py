@@ -9,7 +9,6 @@ Tests ensure:
 - End-to-end workflow works (Phase 1 → Phase 2 → NN → Ensemble)
 """
 
-import sys
 from pathlib import Path
 import tempfile
 import shutil
@@ -22,19 +21,15 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
-# Add ai-resources directory to path
-ai_resources_path = str(Path(__file__).parent.parent / "ai-resources")
-sys.path.insert(0, ai_resources_path)
-
-from adaptive_trainer import train_with_adaptive_search
-from nn_trainer import PasswordNNTrainer
-from nn_models import PasswordCNN
-from nn_tokenizer import PasswordTokenizer
-from ensemble import EnsemblePredictor
-from model_registry import UnifiedModelRegistry
-from model_comparison import ModelComparison
-from shared_lib.checkpoint_manager import CheckpointManager
-from shared_lib.control_signal import ControlSignal
+from harp.adaptive_trainer import train_with_adaptive_search
+from harp.nn_trainer import PasswordNNTrainer
+from harp.nn_models import PasswordCNN
+from harp.nn_tokenizer import PasswordTokenizer
+from harp.ensemble import EnsemblePredictor
+from harp.model_registry import UnifiedModelRegistry
+from harp.model_comparison import ModelComparison
+from harp.shared_lib.checkpoint_manager import CheckpointManager
+from harp.shared_lib.control_signal import ControlSignal
 
 
 # ============================================================================

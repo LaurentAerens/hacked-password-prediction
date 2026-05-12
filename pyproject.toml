@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harp"
+version = "2.0.0"
+description = "Hacked Account Risk Predictor - SSH honeypot password strength classifier"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "LICENSE"}
+keywords = ["machine-learning", "password-strength", "classification", "ssh-honeypot"]
+authors = [{name = "H.A.R.P. Contributors"}]
+
+# Core dependencies (no deep pinning, user can choose requirements-{cpu,gpu,intel}.txt)
+dependencies = [
+    # numpy and pandas are pulled in by scikit-learn / other deps
+]
+
+[project.optional-dependencies]
+cpu = ["tensorflow>=2.11,<3; python_version < '3.12'", "tensorflow>=2.18,<3; python_version >= '3.12'"]
+gpu = ["tensorflow-gpu>=2.11,<3; python_version < '3.12'", "tensorflow-gpu>=2.18,<3; python_version >= '3.12'"]
+intel = ["tensorflow-intel>=2.11,<3; python_version < '3.12'"]
+ui = ["streamlit>=1.28"]
+dev = ["pytest>=7.0", "black", "isort", "mypy"]
+
+[project.scripts]
+harp-train = "harp.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+harp = ["data/*.csv", "modern_trainers/**/*.py"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

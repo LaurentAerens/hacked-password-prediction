@@ -1,20 +1,47 @@
-*/models
-config.json
-.venv
+# Generated directories
+results/
 mlruns/
-.optuna/
-*.pyc
-__pycache__/
-.mlflow/
-*/plan/*
-test_results.txt
-test_output.log
-ai-resources/results/checkpoints/*
-.venv-ui/*
+!results/.gitkeep
 
-# Phase training CSV artifacts
-**/results/phase1_gridsearch_*.csv
-**/results/phase2_optuna_*.csv
-models/nn/checkpoints/*
-models/nn/*
-ai-resources/results/*
+# Python build and install artifacts
+src/harp.egg-info/
+src/*.egg-info/
+dist/
+build/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+.venv-ui/
+venv/
+env/
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Data and cache
+*.csv
+*.db
+*.joblib
+*.pkl
+*.pt
+*.pth
+mlflow_runs/
+.streamlit/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Old structure (no longer exists but keep for safety)
+ai-resources/
+tmp/
+scripts/
