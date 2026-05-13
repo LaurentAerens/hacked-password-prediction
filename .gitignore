@@ -3,6 +3,14 @@ results/
 mlruns/
 !results/.gitkeep
 
+# Planning and research artifacts (workflow outputs)
+docs/plan/**/*.yaml
+docs/plan/**/*.md
+
+# Ensemble and checkpoint artifacts
+models/ensemble/final/
+results/checkpoints/
+
 # Python build and install artifacts
 src/harp.egg-info/
 src/*.egg-info/
@@ -26,8 +34,7 @@ env/
 .DS_Store
 Thumbs.db
 
-# Data and cache
-*.csv
+# Data and cache (specific exclusions, not blanket *.csv)
 *.db
 *.joblib
 *.pkl
@@ -45,3 +52,8 @@ htmlcov/
 ai-resources/
 tmp/
 scripts/
+
+# Cached model/data files (not demo data)
+*.onnx
+tmp_*.csv
+cache/
